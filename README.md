@@ -36,6 +36,7 @@ Chainsaw provides a powerful ‘first-response’ capability to quickly identify
   - [EDR and AV Warnings](#edr-and-av-warnings)
   - [What changed in Chainsaw v2](#what-changed-in-chainsaw-v2)
 - [Examples](#examples)
+  - [Interactive Menu](#interactive-menu)
   - [Searching](#searching)
   - [Hunting](#hunting)
   - [Analysis](#analysis)
@@ -171,6 +172,22 @@ If you still wish to use the version 1 of Chainsaw, you can find compiled binari
 A massive thank you to [@AlexKornitzer](https://twitter.com/AlexKornitzer?lang=en) who managed to convert Chainsaw v1's "Christmas Project" codebase into a polished product in v2.
 
 ## Examples
+### Interactive Menu
+
+Running `chainsaw` with no arguments (or `chainsaw menu`) opens an interactive terminal menu that
+exposes every operation (`dump`, `hunt`, `lint`, `search` and each `analyse` subcommand) along with
+all of their options. The menu is generated from the CLI definition, so new options appear in it
+automatically.
+
+- Pick an operation, then fill in its arguments and options. Flags toggle, options with fixed
+  values (such as `--level` or `--kind`) open a picker, and text fields support `Tab` path
+  completion. Fields that take multiple values are space separated, with quotes for values that
+  contain spaces.
+- The equivalent command line is previewed as you go, so it can be copied into scripts.
+- `F5` (or `Ctrl+R`, or the `Run` row) validates the options and runs the command. Output is shown
+  in the normal terminal, and pressing `Enter` returns to the menu with the previous values kept.
+- `?` shows the full `--help` for the operation, `x` clears a field and `X` clears the form.
+
 ### Searching
 
       USAGE:
