@@ -105,7 +105,8 @@ enum Command {
 
     /// Hunt through artefacts using detection rules for threat detection.
     Hunt {
-        /// The path to a collection of rules to use for hunting.
+        /// The path to a collection of rules to use for hunting. When no rules are given, the
+        /// bundled Chainsaw and Sigma rules are used and a single path is treated as the evidence.
         rules: Option<PathBuf>,
 
         /// The paths containing files to load and hunt through.
@@ -175,14 +176,13 @@ enum Command {
         /// Suppress informational output.
         #[arg(short = 'q')]
         quiet: bool,
-        /// A path containing Sigma rules to hunt with.
-        #[arg(
-            short = 's',
-            long = "sigma",
-            number_of_values = 1,
-            requires = "mapping"
-        )]
+        /// A path containing Sigma rules to hunt with. Uses the bundled event log mapping unless
+        /// --mapping is provided.
+        #[arg(short = 's', long = "sigma", number_of_values = 1)]
         sigma: Option<Vec<PathBuf>>,
+        /// Also hunt with the bundled Chainsaw and Sigma rules (the default when no rules are given).
+        #[arg(long = "bundled")]
+        bundled: bool,
         /// Continue to hunt when an error is encountered.
         #[arg(long = "skip-errors")]
         skip_errors: bool,
@@ -615,6 +615,7 @@ fn run() -> Result<()> {
             mapping,
             rule,
 
+            bundled,
             load_unknown,
             cache,
             mut column_width,
@@ -667,6 +668,32 @@ fn run() -> Result<()> {
             init_writer(output.clone(), csv, json, quiet, args.verbose)?;
             if !args.no_banner {
                 print_title();
+            }
+            let (mut rules, mut rule, mut sigma, mut mapping) = (rules, rule, sigma, mapping);
+            let implicit =
+                rule.is_none() && sigma.is_none() && (rules.is_none() || path.is_empty());
+            if bundled || implicit {
+                let bundle = chainsaw::bundle::extract()?;
+                let (chainsaw_count, sigma_count) = chainsaw::bundle::counts();
+                cs_eprintln!(
+                    "[+] Using bundled rules ({} Chainsaw, {} Sigma)",
+                    chainsaw_count,
+                    sigma_count
+                );
+                if let Some(r) = rules.take() {
+                    if path.is_empty() {
+                        path.push(r);
+                    } else {
+                        rule.get_or_insert_with(Vec::new).push(r);
+                    }
+                }
+                rule.get_or_insert_with(Vec::new).push(bundle.rules);
+                sigma.get_or_insert_with(Vec::new).push(bundle.sigma);
+                if mapping.is_none() {
+                    mapping = Some(vec![bundle.mapping]);
+                }
+            } else if sigma.is_some() && mapping.is_none() {
+                mapping = Some(vec![chainsaw::bundle::extract()?.mapping]);
             }
             let mut rs = vec![];
             if rule.is_some() || sigma.is_some() {

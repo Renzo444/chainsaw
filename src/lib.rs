@@ -22,6 +22,7 @@ pub use write::{Format, Writer, set_writer, writer};
 mod write;
 
 mod analyse;
+pub mod bundle;
 pub mod cli;
 mod ext;
 mod file;
