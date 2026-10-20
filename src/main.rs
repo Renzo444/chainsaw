@@ -20,7 +20,11 @@ use chainsaw::{
     RuleStatus, Searcher, ShimcacheAnalyser, SrumAnalyser, Writer, cli, flatten_gaps_for_json,
     get_files, lint as lint_rule, load as load_rule, print_evtx_text_report, print_gap_text_report,
     set_writer,
+    window::{Window, delocalise},
 };
+
+/// The field holding the timestamp of an event log record.
+const EVTX_TIMESTAMP: &str = "Event.System.TimeCreated_attributes.SystemTime";
 
 mod menu;
 
@@ -192,6 +196,14 @@ enum Command {
         /// (YYYY-MM-ddTHH:mm:SS)
         #[arg(long = "to")]
         to: Option<NaiveDateTime>,
+        /// Only look at the most recent period, e.g. 24h, 48h or 7d. The window ends now, or at
+        /// --anchor when provided.
+        #[arg(long = "last", value_name = "DURATION", conflicts_with_all = ["from", "to"])]
+        last: Option<String>,
+        /// The end of the --last window instead of now (YYYY-MM-ddTHH:mm:SS), e.g. the time the
+        /// evidence was collected.
+        #[arg(long = "anchor", requires = "last")]
+        anchor: Option<NaiveDateTime>,
     },
 
     /// Lint provided rules to ensure that they load correctly
@@ -273,6 +285,14 @@ enum Command {
         /// (YYYY-MM-ddTHH:mm:SS)
         #[arg(long = "to", requires = "timestamp")]
         to: Option<NaiveDateTime>,
+        /// Only look at the most recent period, e.g. 24h, 48h or 7d. The window ends now, or at
+        /// --anchor when provided. Uses the event log timestamp unless --timestamp is set.
+        #[arg(long = "last", value_name = "DURATION", conflicts_with_all = ["from", "to"])]
+        last: Option<String>,
+        /// The end of the --last window instead of now (YYYY-MM-ddTHH:mm:SS), e.g. the time the
+        /// evidence was collected.
+        #[arg(long = "anchor", requires = "last")]
+        anchor: Option<NaiveDateTime>,
     },
 
     /// Perform various analyses on artefacts
@@ -616,8 +636,16 @@ fn run() -> Result<()> {
             skip_errors,
             status,
             timezone,
-            to,
+            mut to,
+            last,
+            anchor,
         } => {
+            let mut from = from;
+            if last.is_some() {
+                let window = Window::resolve(None, None, last.as_deref(), anchor, timezone, local)?;
+                from = window.from.map(|t| delocalise(&t, timezone, local));
+                to = window.to.map(|t| delocalise(&t, timezone, local));
+            }
             if column_width.is_none() {
                 column_width = resolve_col_width();
             }
@@ -964,10 +992,21 @@ fn run() -> Result<()> {
             quiet,
             skip_errors,
             tau,
-            timestamp,
+            mut timestamp,
             timezone,
-            to,
+            mut to,
+            last,
+            anchor,
         } => {
+            let mut from = from;
+            if last.is_some() {
+                let window = Window::resolve(None, None, last.as_deref(), anchor, timezone, local)?;
+                from = window.from.map(|t| delocalise(&t, timezone, local));
+                to = window.to.map(|t| delocalise(&t, timezone, local));
+                if timestamp.is_none() {
+                    timestamp = Some(EVTX_TIMESTAMP.to_string());
+                }
+            }
             init_writer(output, false, json, quiet, args.verbose)?;
             if !args.no_banner {
                 print_title();

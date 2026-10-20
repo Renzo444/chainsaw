@@ -29,3 +29,4 @@ mod hunt;
 pub mod rule;
 mod search;
 mod value;
+pub mod window;
