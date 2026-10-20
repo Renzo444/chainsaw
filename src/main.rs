@@ -13,7 +13,7 @@ use bytesize::ByteSize;
 use chrono::NaiveDateTime;
 use chrono_tz::Tz;
 
-use clap::{ArgAction, Parser, Subcommand};
+use clap::{ArgAction, CommandFactory, Parser, Subcommand};
 
 use chainsaw::{
     Document, EvtxAnalyser, Filter, Format, GapAnalyser, Hunter, Reader, RuleKind, RuleLevel,
@@ -21,6 +21,8 @@ use chainsaw::{
     get_files, lint as lint_rule, load as load_rule, print_evtx_text_report, print_gap_text_report,
     set_writer,
 };
+
+mod menu;
 
 #[derive(Parser)]
 #[clap(
@@ -39,6 +41,9 @@ use chainsaw::{
 
     Search for Powershell Script Block Events (EventID 4014):
         ./chainsaw search -t 'Event.System.EventID: =4104' evtx_attack_samples/
+
+    Launch the interactive menu (also launched when run without arguments):
+        ./chainsaw menu
     ",
     version
 )]
@@ -275,6 +280,9 @@ enum Command {
         #[command(subcommand)]
         cmd: AnalyseCommand,
     },
+
+    /// Launch the interactive menu to build and run any of the operations above.
+    Menu,
 }
 
 #[derive(Subcommand)]
@@ -457,7 +465,14 @@ fn init_writer(
 }
 
 fn run() -> Result<()> {
+    use std::io::IsTerminal;
+    if std::env::args_os().len() == 1 && std::io::stdout().is_terminal() {
+        return menu::run(Args::command());
+    }
     let args = Args::parse();
+    if let Command::Menu = args.cmd {
+        return menu::run(Args::command());
+    }
     if let Some(num_threads) = args.num_threads {
         rayon::ThreadPoolBuilder::new()
             .num_threads(num_threads)
@@ -1272,6 +1287,7 @@ fn run() -> Result<()> {
                 }
             }
         }
+        Command::Menu => unreachable!("handled above"),
     }
     flush!()?;
     Ok(())
