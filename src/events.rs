@@ -212,6 +212,15 @@ pub fn is_suspicious_path(path: &str) -> bool {
         "https://",
         "\\\\",
     ];
+    // Well known software that legitimately runs from user writable locations.
+    const ALLOWED: &[&str] = &[
+        "\\programdata\\microsoft\\windows defender\\",
+        "\\appdata\\local\\microsoft\\onedrive\\",
+        "\\appdata\\local\\microsoft\\teams\\",
+    ];
+    if ALLOWED.iter().any(|a| p.contains(a)) && !LOLBINS.iter().any(|m| p.contains(m)) {
+        return false;
+    }
     MARKERS.iter().any(|m| p.contains(m))
         || LOLBINS.iter().any(|m| p.contains(m))
         || p.starts_with("\\\\")
@@ -253,5 +262,8 @@ mod tests {
         assert!(is_suspicious_path(r"powershell.exe -enc AAAA"));
         assert!(!is_suspicious_path(r"C:\Windows\System32\svchost.exe -k netsvcs"));
         assert!(!is_suspicious_path(r#""C:\Program Files\Vendor\agent.exe""#));
+        assert!(!is_suspicious_path(
+            r#""C:\ProgramData\Microsoft\Windows Defender\Platform\4.18\MsMpEng.exe""#
+        ));
     }
 }

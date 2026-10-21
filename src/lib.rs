@@ -30,6 +30,7 @@ mod file;
 pub mod findings;
 mod hunt;
 pub mod ioc;
+pub mod persistence;
 pub mod process;
 pub mod rule;
 mod search;

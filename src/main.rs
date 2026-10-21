@@ -16,7 +16,7 @@ use chrono_tz::Tz;
 use clap::{ArgAction, CommandFactory, Parser, Subcommand};
 
 use chainsaw::{
-    Document, EvtxAnalyser, findings, ioc, process, Filter, Format, GapAnalyser, Hunter, Reader, RuleKind, RuleLevel,
+    Document, EvtxAnalyser, findings, ioc, persistence, process, Filter, Format, GapAnalyser, Hunter, Reader, RuleKind, RuleLevel,
     RuleStatus, Searcher, ShimcacheAnalyser, SrumAnalyser, Writer, cli, flatten_gaps_for_json,
     get_files, lint as lint_rule, load as load_rule, print_evtx_text_report, print_gap_text_report,
     set_writer,
@@ -343,6 +343,21 @@ enum Command {
         /// Leave out network, DNS, file and registry activity from the timeline.
         #[arg(long = "no-activity")]
         no_activity: bool,
+        #[command(flatten)]
+        window: WindowArgs,
+        #[command(flatten)]
+        report: ReportArgs,
+    },
+
+    /// Sweep for the most common persistence mechanisms (services, scheduled tasks, Run keys, WMI,
+    /// startup folders, accounts and more) in event logs, registry hives and collected files.
+    Persistence {
+        /// The paths containing event logs, registry hives (SOFTWARE, SYSTEM, NTUSER.DAT,
+        /// UsrClass.dat) and collected files.
+        path: Vec<PathBuf>,
+        /// Only report items at or above this severity: critical, high, medium, low or info.
+        #[arg(long = "min-level")]
+        min_level: Option<RuleLevel>,
         #[command(flatten)]
         window: WindowArgs,
         #[command(flatten)]
@@ -1580,6 +1595,25 @@ fn run() -> Result<()> {
                 window: window.resolve()?,
                 output: report.format(),
                 skip_errors: report.skip_errors,
+            })?;
+            report.done();
+        }
+        Command::Persistence {
+            path,
+            min_level,
+            window,
+            report,
+        } => {
+            report.init(args.verbose)?;
+            if !args.no_banner {
+                print_title();
+            }
+            persistence::run(persistence::Options {
+                paths: path,
+                window: window.resolve()?,
+                output: report.format(),
+                skip_errors: report.skip_errors,
+                min_level,
             })?;
             report.done();
         }
