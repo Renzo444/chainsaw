@@ -9,6 +9,10 @@
 </div>
 
 ---
+> **Rockwheel** is a fork of [WithSecure's Chainsaw](https://github.com/WithSecureLabs/chainsaw) with an
+> interactive menu, bundled Sigma rules and investigation commands (`ioc`, `process`, `persistence`).
+> The binary is called `rockwheel`; everything below that mentions `chainsaw` applies to it as well.
+
 Chainsaw provides a powerful ‘first-response’ capability to quickly identify threats within Windows forensic artefacts such as Event Logs and the MFT file. Chainsaw offers a generic and fast method of searching through event logs for keywords, and by identifying threats using built-in support for Sigma detection rules, and via custom Chainsaw detection rules.
 
 ## Features
@@ -175,7 +179,7 @@ A massive thank you to [@AlexKornitzer](https://twitter.com/AlexKornitzer?lang=e
 ## Examples
 ### Interactive Menu
 
-Running `chainsaw` with no arguments (or `chainsaw menu`) opens an interactive terminal menu that
+Running `rockwheel` with no arguments (or `rockwheel menu`) opens an interactive terminal menu that
 exposes every operation (`dump`, `hunt`, `lint`, `search` and each `analyse` subcommand) along with
 all of their options. The menu is generated from the CLI definition, so new options appear in it
 automatically.
@@ -199,7 +203,7 @@ window options and output formats, and all are available from the interactive me
 The Chainsaw rules and the Windows rules from [SigmaHQ](https://github.com/SigmaHQ/sigma) (with the
 event log mapping) are built into the binary, so hunting needs nothing else:
 
-    ./chainsaw hunt evidence/
+    ./rockwheel hunt evidence/
 
 Add `--bundled` to hunt with them alongside your own `-r`/`-s` rules. `-s` no longer needs a
 `--mapping`; the bundled event log mapping is used by default. Refresh the bundled Sigma rules with
@@ -211,7 +215,7 @@ Add `--bundled` to hunt with them alongside your own `-r`/`-s` rules. `-s` no lo
 `48h` or `7d`), which ends now, or at `--anchor <timestamp>` when the evidence was collected
 earlier:
 
-    ./chainsaw hunt evidence/ --last 48h --anchor 2024-05-01T09:30:00
+    ./rockwheel hunt evidence/ --last 48h --anchor 2024-05-01T09:30:00
 
 #### Ranked findings and Markdown reports
 
@@ -220,7 +224,7 @@ ATT&CK tactics (impact, exfiltration and credential access rank above discovery,
 by how many hosts they touch. `--markdown` writes the ranked findings with the evidence behind each
 one as an easy to read report:
 
-    ./chainsaw hunt evidence/ --last 7d --markdown -o report.md
+    ./rockwheel hunt evidence/ --last 7d --markdown -o report.md
 
 #### IOC sweep
 
@@ -228,7 +232,7 @@ Pivot on known bad process names, domains, IPs, hashes or keywords across every 
 Indicators are typed automatically, matched on word boundaries, and can be given inline or in a file
 of `value[,severity[,note]]` lines (defanged values such as `evil[.]com` are accepted):
 
-    ./chainsaw ioc evidence/ --ioc mimikatz.exe --ioc evil.com -f iocs.txt
+    ./rockwheel ioc evidence/ --ioc mimikatz.exe --ioc evil.com -f iocs.txt
 
 Matches are ranked, and the processes behind them are listed with their Sysmon ProcessGuid for
 drilling down.
@@ -239,14 +243,14 @@ Rebuild process trees from Sysmon Event ID 1 and Security Event ID 4688, then fo
 parents and every child it spawned, with a timeline of their network, DNS, file and registry
 activity:
 
-    ./chainsaw process evidence/ --name powershell.exe
-    ./chainsaw process evidence/ --guid 747F3D96-D83E-5D31-0000-0010A2D72E00
+    ./rockwheel process evidence/ --name powershell.exe
+    ./rockwheel process evidence/ --guid 747F3D96-D83E-5D31-0000-0010A2D72E00
 
 #### Persistence sweep
 
 Check the most common persistence locations in one go and rank what is found:
 
-    ./chainsaw persistence evidence/ --min-level medium
+    ./rockwheel persistence evidence/ --min-level medium
 
 It covers new services, scheduled tasks, Run keys and other autorun registry locations, Winlogon,
 Image File Execution Options, AppInit DLLs, LSA packages, WMI event subscriptions, startup folders,
@@ -287,15 +291,15 @@ TaskScheduler and WMI-Activity), registry hives found in the evidence (`SOFTWARE
 
    *Search all .evtx files for the case-insensitive string "mimikatz"*
 
-    ./chainsaw search mimikatz -i evtx_attack_samples/
+    ./rockwheel search mimikatz -i evtx_attack_samples/
 
  *Search all .evtx files for powershell script block events (Event ID 4014)
 
-    ./chainsaw search -t 'Event.System.EventID: =4104' evtx_attack_samples/
+    ./rockwheel search -t 'Event.System.EventID: =4104' evtx_attack_samples/
 
    *Search a specific evtx log for logon events, with a matching regex pattern, output in JSON format*
 
-    ./chainsaw search -e "DC[0-9].insecurebank.local" evtx_attack_samples --json
+    ./rockwheel search -e "DC[0-9].insecurebank.local" evtx_attack_samples --json
 
 
 ### Hunting
@@ -338,19 +342,19 @@ TaskScheduler and WMI-Activity), registry hives found in the evidence (`SOFTWARE
 
    *Hunt through all evtx files using Sigma rules for detection logic*
 
-    ./chainsaw hunt evtx_attack_samples/ -s sigma/ --mapping mappings/sigma-event-logs-all.yml
+    ./rockwheel hunt evtx_attack_samples/ -s sigma/ --mapping mappings/sigma-event-logs-all.yml
 
    *Hunt through all evtx files using Sigma rules and Chainsaw rules for detection logic and output in CSV format to the results folder*
 
-    ./chainsaw hunt evtx_attack_samples/ -s sigma/ --mapping mappings/sigma-event-logs-all.yml -r rules/ --csv --output results
+    ./rockwheel hunt evtx_attack_samples/ -s sigma/ --mapping mappings/sigma-event-logs-all.yml -r rules/ --csv --output results
 
    *Hunt through all evtx files using Sigma rules for detection logic, only search between specific timestamps, and output the results in JSON format*
 
-     ./chainsaw hunt evtx_attack_samples/ -s sigma/ --mapping mappings/sigma-event-logs-all.yml --from "2019-03-17T19:09:39" --to "2019-03-17T19:09:50" --json
+     ./rockwheel hunt evtx_attack_samples/ -s sigma/ --mapping mappings/sigma-event-logs-all.yml --from "2019-03-17T19:09:39" --to "2019-03-17T19:09:50" --json
 
 #### Output
 
-    $ ./chainsaw hunt -r rules/ evtx_attack_samples -s sigma/rules --mapping mappings/sigma-event-logs-all.yml --level critical
+    $ ./rockwheel hunt -r rules/ evtx_attack_samples -s sigma/rules --mapping mappings/sigma-event-logs-all.yml --level critical
 
          ██████╗██╗  ██╗ █████╗ ██╗███╗   ██╗███████╗ █████╗ ██╗    ██╗
         ██╔════╝██║  ██║██╔══██╗██║████╗  ██║██╔════╝██╔══██╗██║    ██║
@@ -484,12 +488,12 @@ TaskScheduler and WMI-Activity), registry hives found in the evidence (`SOFTWARE
 ##### Command Examples
    *Analyse a shimcache artefact with the provided regex patterns, and use amcache enrichment with timestamp near pair detection enabled. Output to a csv file.*
 
-    ./chainsaw analyse shimcache ./SYSTEM --regexfile ./analysis/shimcache_patterns.txt --amcache ./Amcache.hve --tspair --output ./output.csv
+    ./rockwheel analyse shimcache ./SYSTEM --regexfile ./analysis/shimcache_patterns.txt --amcache ./Amcache.hve --tspair --output ./output.csv
 
 
    *Analyse a shimcache artefact with the provided regex patterns (without amcache enrichment). Output to the terminal.*
 
-    ./chainsaw analyse shimcache ./SYSTEM --regexfile ./analysis/shimcache_patterns.txt
+    ./rockwheel analyse shimcache ./SYSTEM --regexfile ./analysis/shimcache_patterns.txt
 
 #### Gaps (event log gap detection)
 Detects two indicators of selective event-log tampering inside one or more `.evtx` files:
@@ -519,11 +523,11 @@ Detects two indicators of selective event-log tampering inside one or more `.evt
 ##### Command Examples
    *Scan a directory of evtx files for both RecordID and time gaps with the default 30-minute threshold:*
 
-    ./chainsaw analyse gaps ./Logs/
+    ./rockwheel analyse gaps ./Logs/
 
    *Only look for selectively deleted records (RecordID holes), and emit machine-readable JSON:*
 
-    ./chainsaw analyse gaps ./Logs/ --no-time-gaps --json -o ./gaps.json
+    ./rockwheel analyse gaps ./Logs/ --no-time-gaps --json -o ./gaps.json
 
 #### SRUM (System Resource Usage Monitor)
 The SRUM database parser implemented in Chainsaw differs from other parsers because it does not rely on hardcoded values about the tables. The information is extracted directly from the SOFTWARE hive, which is a mandatory argument. The goal is to avoid errors related to unknown tables.
@@ -548,11 +552,11 @@ The SRUM database parser implemented in Chainsaw differs from other parsers beca
 
    *Analyse the SRUM database (the SOFTWARE hive is mandatory)*
 
-    ./chainsaw analyse srum --software ./SOFTWARE ./SRUDB.dat --output ./output.json
+    ./rockwheel analyse srum --software ./SOFTWARE ./SRUDB.dat --output ./output.json
 
 ##### Output
 
-    $ ./chainsaw analyse srum --software ./SOFTWARE ./SRUDB.dat -o ./output.json
+    $ ./rockwheel analyse srum --software ./SOFTWARE ./SRUDB.dat -o ./output.json
 
          ██████╗██╗  ██╗ █████╗ ██╗███╗   ██╗███████╗ █████╗ ██╗    ██╗
         ██╔════╝██║  ██║██╔══██╗██║████╗  ██║██╔════╝██╔══██╗██║    ██║
@@ -626,7 +630,7 @@ Information about the new forensic insights related to this artefact can be foun
 
    *Dump the SOFTWARE hive*
 
-    ./chainsaw dump ./SOFTWARE.hve --json --output ./output.json
+    ./rockwheel dump ./SOFTWARE.hve --json --output ./output.json
 
 
 ## Acknowledgements

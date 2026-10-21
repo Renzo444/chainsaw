@@ -71,7 +71,7 @@ fn fingerprint() -> String {
 }
 
 fn cache_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("CHAINSAW_CACHE_DIR") {
+    if let Some(dir) = std::env::var_os("ROCKWHEEL_CACHE_DIR") {
         return PathBuf::from(dir);
     }
     let base = if cfg!(windows) {
@@ -83,7 +83,7 @@ fn cache_dir() -> PathBuf {
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
     };
-    base.unwrap_or_else(std::env::temp_dir).join("chainsaw")
+    base.unwrap_or_else(std::env::temp_dir).join("rockwheel")
 }
 
 /// Writes the embedded files into `dest`.
@@ -117,7 +117,7 @@ pub fn extract() -> crate::Result<Bundle> {
     }
     fs::create_dir_all(&cache).map_err(|e| {
         anyhow!(
-            "could not create cache directory '{}' - {} (set CHAINSAW_CACHE_DIR to override)",
+            "could not create cache directory '{}' - {} (set ROCKWHEEL_CACHE_DIR to override)",
             cache.display(),
             e
         )
@@ -156,12 +156,12 @@ mod tests {
     fn extracts_once() {
         let dir = tempfile::tempdir().unwrap();
         // SAFETY: tests that read this variable run in this test only.
-        unsafe { std::env::set_var("CHAINSAW_CACHE_DIR", dir.path()) };
+        unsafe { std::env::set_var("ROCKWHEEL_CACHE_DIR", dir.path()) };
         let first = extract().unwrap();
         assert!(first.mapping.is_file());
         assert!(first.sigma.join("rules").join("windows").is_dir());
         let second = extract().unwrap();
         assert_eq!(first.root, second.root);
-        unsafe { std::env::remove_var("CHAINSAW_CACHE_DIR") };
+        unsafe { std::env::remove_var("ROCKWHEEL_CACHE_DIR") };
     }
 }

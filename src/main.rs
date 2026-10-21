@@ -26,33 +26,34 @@ use chainsaw::{
 /// The field holding the timestamp of an event log record.
 const EVTX_TIMESTAMP: &str = "Event.System.TimeCreated_attributes.SystemTime";
 
+mod banner;
 mod menu;
 
 #[derive(Parser)]
 #[clap(
-    name = "chainsaw",
-    about = "Rapidly work with Forensic Artefacts",
+    name = "rockwheel",
+    about = "Rockwheel - rapidly hunt through forensic artefacts (built on Chainsaw)",
     after_help = r"Examples:
 
     Hunt with Sigma and Chainsaw Rules:
-        ./chainsaw hunt evtx_attack_samples/ -s sigma/ --mapping mappings/sigma-event-logs-all.yml -r rules/
+        ./rockwheel hunt evtx_attack_samples/ -s sigma/ --mapping mappings/sigma-event-logs-all.yml -r rules/
 
     Hunt with Sigma rules and output in JSON:
-        ./chainsaw hunt evtx_attack_samples/ -s sigma/ --mapping mappings/sigma-event-logs-all.yml --json
+        ./rockwheel hunt evtx_attack_samples/ -s sigma/ --mapping mappings/sigma-event-logs-all.yml --json
 
     Search for the case-insensitive word 'mimikatz':
-        ./chainsaw search mimikatz -i evtx_attack_samples/
+        ./rockwheel search mimikatz -i evtx_attack_samples/
 
     Search for Powershell Script Block Events (EventID 4014):
-        ./chainsaw search -t 'Event.System.EventID: =4104' evtx_attack_samples/
+        ./rockwheel search -t 'Event.System.EventID: =4104' evtx_attack_samples/
 
     Launch the interactive menu (also launched when run without arguments):
-        ./chainsaw menu
+        ./rockwheel menu
     ",
     version
 )]
 struct Args {
-    /// Hide Chainsaw's banner.
+    /// Hide the Rockwheel banner.
     #[arg(long)]
     no_banner: bool,
     /// Limit the thread number (default: num of CPUs)
@@ -78,7 +79,7 @@ enum Command {
         /// Print the output in jsonl format.
         #[arg(group = "format", long = "jsonl")]
         jsonl: bool,
-        /// Allow chainsaw to try and load files it cannot identify.
+        /// Allow Rockwheel to try and load files it cannot identify.
         #[arg(long = "load-unknown")]
         load_unknown: bool,
         /// Only dump files with the provided extension.
@@ -155,7 +156,7 @@ enum Command {
         /// Restrict loaded rules to specified levels.
         #[arg(long = "level", number_of_values = 1)]
         level: Vec<RuleLevel>,
-        /// Allow chainsaw to try and load files it cannot identify.
+        /// Allow Rockwheel to try and load files it cannot identify.
         #[arg(long = "load-unknown")]
         load_unknown: bool,
         /// Output the timestamp using the local machine's timestamp.
@@ -256,7 +257,7 @@ enum Command {
         /// Print the output in jsonl format.
         #[arg(group = "format", long = "jsonl")]
         jsonl: bool,
-        /// Allow chainsaw to try and load files it cannot identify.
+        /// Allow Rockwheel to try and load files it cannot identify.
         #[arg(long = "load-unknown")]
         load_unknown: bool,
         /// Output the timestamp using the local machine's timestamp.
@@ -552,17 +553,7 @@ enum AnalyseCommand {
 }
 
 fn print_title() {
-    cs_eprintln!(
-        "
- ██████╗██╗  ██╗ █████╗ ██╗███╗   ██╗███████╗ █████╗ ██╗    ██╗
-██╔════╝██║  ██║██╔══██╗██║████╗  ██║██╔════╝██╔══██╗██║    ██║
-██║     ███████║███████║██║██╔██╗ ██║███████╗███████║██║ █╗ ██║
-██║     ██╔══██║██╔══██║██║██║╚██╗██║╚════██║██╔══██║██║███╗██║
-╚██████╗██║  ██║██║  ██║██║██║ ╚████║███████║██║  ██║╚███╔███╔╝
- ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝
-    By WithSecure Countercept (@FranticTyping, @AlexKornitzer)
-"
-    );
+    cs_eprintln!("\n{}", banner::title(banner::terminal_width()));
 }
 
 fn resolve_col_width() -> Option<u32> {

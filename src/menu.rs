@@ -300,7 +300,7 @@ impl Operation {
     }
 
     fn preview(&self) -> String {
-        std::iter::once("chainsaw".to_string())
+        std::iter::once("rockwheel".to_string())
             .chain(self.argv().iter().map(|a| quote(a)))
             .collect::<Vec<_>>()
             .join(" ")
@@ -368,6 +368,23 @@ const ORDER: &[&str] = &[
     "dump",
     "lint",
 ];
+
+/// Greedy word wrap to `width` columns. Words longer than a line are left whole.
+fn wrap_words(text: &str, width: usize) -> Vec<String> {
+    let mut lines = vec![String::new()];
+    for word in text.split_whitespace() {
+        let line = lines.last_mut().expect("never empty");
+        if line.is_empty() {
+            line.push_str(word);
+        } else if line.chars().count() + 1 + word.chars().count() <= width {
+            line.push(' ');
+            line.push_str(word);
+        } else {
+            lines.push(word.to_string());
+        }
+    }
+    lines
+}
 
 /// Splits a string into words on whitespace, honouring single and double quotes. Backslashes
 /// are not treated as escapes so that Windows paths can be entered as-is.
@@ -562,7 +579,7 @@ impl App {
     }
 
     fn validate(&self) -> std::result::Result<(), String> {
-        let mut argv = vec!["chainsaw".to_string()];
+        let mut argv = vec!["rockwheel".to_string()];
         argv.extend(self.op().argv());
         self.root
             .clone()
@@ -662,7 +679,7 @@ impl App {
                     cmd = cmd.find_subcommand_mut(p).expect("subcommand exists");
                 }
                 self.popup = Popup::Message {
-                    title: format!("chainsaw {} --help", self.op().name()),
+                    title: format!("rockwheel {} --help", self.op().name()),
                     body: cmd.render_long_help().to_string(),
                     scroll: 0,
                 };
@@ -828,16 +845,37 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        let [header, body, footer] = Layout::vertical([
+        // The full block-letter banner only on the main screen, and only when it leaves room.
+        let area = frame.area();
+        let art = matches!(self.screen, Screen::Main)
+            && area.height >= 32
+            && area.width as usize >= crate::banner::width(crate::banner::WORD) + 2;
+        let banner_height = if art {
+            crate::banner::WORD.lines().count() as u16 + 1
+        } else {
+            0
+        };
+        let [banner, header, body, footer] = Layout::vertical([
+            Constraint::Length(banner_height),
             Constraint::Length(1),
             Constraint::Min(5),
             Constraint::Length(1),
         ])
-        .areas(frame.area());
+        .areas(area);
+        if art {
+            let lines: Vec<Line> = crate::banner::WORD
+                .lines()
+                .map(|l| Line::from(format!(" {}", l)).green().bold())
+                .collect();
+            frame.render_widget(Text::from(lines), banner);
+        }
         frame.render_widget(
             Line::from(vec![
-                Span::styled(" CHAINSAW ", Style::new().black().on_green().bold()),
-                Span::raw(format!(" {} · interactive menu", env!("CARGO_PKG_VERSION"))),
+                Span::styled(" ROCKWHEEL ", Style::new().black().on_green().bold()),
+                Span::raw(format!(
+                    " {} · interactive menu · built on Chainsaw",
+                    env!("CARGO_PKG_VERSION")
+                )),
             ]),
             header,
         );
@@ -889,7 +927,9 @@ impl App {
         let text = match self.ops.get(i) {
             Some(op) => {
                 let mut lines = vec![
-                    Line::from(format!("chainsaw {}", op.name())).bold().green(),
+                    Line::from(format!("rockwheel {}", op.name()))
+                        .bold()
+                        .green(),
                     Line::from(op.about.clone()),
                 ];
                 let mut heading = "";
@@ -899,10 +939,15 @@ impl App {
                         lines.push(Line::from(""));
                         lines.push(Line::from(heading.to_string()).underlined());
                     }
-                    lines.push(Line::from(vec![
-                        Span::styled(format!("  {:<28}", f.label), Style::new().cyan()),
-                        Span::raw(f.help.clone()),
-                    ]));
+                    // Wrap the help ourselves so continuation lines stay under the description.
+                    let room = (right.width as usize).saturating_sub(2 + 30).max(20);
+                    for (n, chunk) in wrap_words(&f.help, room).into_iter().enumerate() {
+                        let label = if n == 0 { f.label.as_str() } else { "" };
+                        lines.push(Line::from(vec![
+                            Span::styled(format!("  {:<28}", label), Style::new().cyan()),
+                            Span::raw(chunk),
+                        ]));
+                    }
                 }
                 Text::from(lines)
             }
@@ -990,7 +1035,7 @@ impl App {
             .block(
                 Block::bordered()
                     .border_type(BorderType::Rounded)
-                    .title(format!(" chainsaw {} ", op.name()))
+                    .title(format!(" rockwheel {} ", op.name()))
                     .title_bottom(Line::from(format!(" {} ", op.about)).dark_gray()),
             )
             .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
@@ -1134,7 +1179,7 @@ fn execute(exe: &Path, op: &Operation) -> Result<()> {
             Some(code) => writeln!(stdout, "\n[x] Exited with status {}", code)?,
             None => writeln!(stdout, "\n[x] Interrupted")?,
         },
-        Err(e) => writeln!(stdout, "\n[x] Failed to start chainsaw - {}", e)?,
+        Err(e) => writeln!(stdout, "\n[x] Failed to start rockwheel - {}", e)?,
     }
     write!(stdout, "Press Enter to return to the menu...")?;
     stdout.flush()?;
@@ -1223,6 +1268,15 @@ mod tests {
     }
 
     #[test]
+    fn wraps_words_to_width() {
+        assert_eq!(
+            wrap_words("one two three four", 9),
+            vec!["one two", "three", "four"]
+        );
+        assert_eq!(wrap_words("", 9), vec![""]);
+    }
+
+    #[test]
     fn lists_nested_operations_and_hides_menu() {
         let names: Vec<String> = ops().iter().map(|o| o.name()).collect();
         assert_eq!(names, vec!["hunt", "analyse gaps"]);
@@ -1293,7 +1347,7 @@ mod tests {
             ]
         );
         use clap::CommandFactory;
-        let mut full = vec!["chainsaw".to_string()];
+        let mut full = vec!["rockwheel".to_string()];
         full.extend(argv);
         assert!(Root::command().try_get_matches_from(full).is_ok());
         assert!(

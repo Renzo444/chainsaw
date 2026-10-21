@@ -11,7 +11,7 @@ fn search_jq_simple_string() -> Result<(), Box<dyn std::error::Error>> {
     let sample_expected_output_path = Path::new(root)
         .join("tests/evtx")
         .join("clo_search_qj_simple_string.txt");
-    let mut cmd = cargo_bin_cmd!("chainsaw");
+    let mut cmd = cargo_bin_cmd!("rockwheel");
 
     cmd.arg("search").arg("4624").arg(sample_path).arg("-jq");
     cmd.assert().success().stdout(
@@ -32,7 +32,7 @@ fn search_q_jsonl_simple_string() -> Result<(), Box<dyn std::error::Error>> {
     let sample_expected_output_path = Path::new(root)
         .join("tests/evtx")
         .join("clo_search_q_jsonl_simple_string.txt");
-    let mut cmd = cargo_bin_cmd!("chainsaw");
+    let mut cmd = cargo_bin_cmd!("rockwheel");
 
     cmd.arg("search")
         .arg("4624")
@@ -56,7 +56,7 @@ fn search_q_simple_string() -> Result<(), Box<dyn std::error::Error>> {
     let sample_expected_output_path = Path::new(root)
         .join("tests/evtx")
         .join("clo_search_q_simple_string.txt");
-    let mut cmd = cargo_bin_cmd!("chainsaw");
+    let mut cmd = cargo_bin_cmd!("rockwheel");
 
     cmd.arg("search").arg("4624").arg(sample_path).arg("-q");
     cmd.assert().success().stdout(
@@ -80,7 +80,7 @@ fn hunt_r_any_logon() -> Result<(), Box<dyn std::error::Error>> {
     let rule_path = Path::new(root)
         .join("tests/evtx")
         .join("rule-any-logon.yml");
-    let mut cmd = cargo_bin_cmd!("chainsaw");
+    let mut cmd = cargo_bin_cmd!("rockwheel");
 
     cmd.arg("hunt").arg(sample_path).arg("-r").arg(rule_path);
     cmd.assert().success().stdout(
@@ -100,7 +100,7 @@ fn analyse_srum_database_table_details() -> Result<(), Box<dyn std::error::Error
     let sample_expected_output_path = Path::new(root)
         .join("tests/srum")
         .join("analysis_srum_database_table_details.txt");
-    let mut cmd = cargo_bin_cmd!("chainsaw");
+    let mut cmd = cargo_bin_cmd!("rockwheel");
 
     cmd.arg("analyse")
         .arg("srum")
@@ -128,7 +128,7 @@ fn analyse_srum_database_json() -> Result<(), Box<dyn std::error::Error>> {
     let sample_expected_output_path = Path::new(root)
         .join("tests/srum")
         .join("analysis_srum_database_json.txt");
-    let mut cmd = cargo_bin_cmd!("chainsaw");
+    let mut cmd = cargo_bin_cmd!("rockwheel");
 
     cmd.arg("analyse")
         .arg("srum")
@@ -151,7 +151,7 @@ fn analyse_gaps_clean_sample() -> Result<(), Box<dyn std::error::Error>> {
     let sample_path = Path::new(root)
         .join("tests/evtx")
         .join("security_sample.evtx");
-    let mut cmd = cargo_bin_cmd!("chainsaw");
+    let mut cmd = cargo_bin_cmd!("rockwheel");
 
     cmd.arg("--no-banner")
         .arg("analyse")
@@ -173,7 +173,7 @@ fn analyse_gaps_json_output() -> Result<(), Box<dyn std::error::Error>> {
     let sample_path = Path::new(root)
         .join("tests/evtx")
         .join("security_sample.evtx");
-    let mut cmd = cargo_bin_cmd!("chainsaw");
+    let mut cmd = cargo_bin_cmd!("rockwheel");
 
     cmd.arg("--no-banner")
         .arg("analyse")
@@ -193,7 +193,7 @@ fn analyse_gaps_low_threshold_flags_time_gaps() -> Result<(), Box<dyn std::error
     let sample_path = Path::new(root)
         .join("tests/evtx")
         .join("security_sample.evtx");
-    let mut cmd = cargo_bin_cmd!("chainsaw");
+    let mut cmd = cargo_bin_cmd!("rockwheel");
 
     cmd.arg("--no-banner")
         .arg("analyse")
@@ -214,7 +214,7 @@ fn ioc_markdown_report() -> Result<(), Box<dyn std::error::Error>> {
     let sample_path = Path::new(root)
         .join("tests/evtx")
         .join("security_sample.evtx");
-    let mut cmd = cargo_bin_cmd!("chainsaw");
+    let mut cmd = cargo_bin_cmd!("rockwheel");
 
     cmd.arg("--no-banner")
         .arg("ioc")
@@ -242,7 +242,7 @@ fn ioc_respects_time_window() -> Result<(), Box<dyn std::error::Error>> {
     let sample_path = Path::new(root)
         .join("tests/evtx")
         .join("security_sample.evtx");
-    let mut cmd = cargo_bin_cmd!("chainsaw");
+    let mut cmd = cargo_bin_cmd!("rockwheel");
 
     cmd.arg("--no-banner")
         .arg("ioc")
@@ -265,7 +265,7 @@ fn ioc_respects_time_window() -> Result<(), Box<dyn std::error::Error>> {
 fn persistence_without_findings() -> Result<(), Box<dyn std::error::Error>> {
     let root = env!("CARGO_MANIFEST_DIR");
     let sample_path = Path::new(root).join("tests/evtx");
-    let mut cmd = cargo_bin_cmd!("chainsaw");
+    let mut cmd = cargo_bin_cmd!("rockwheel");
 
     cmd.arg("--no-banner").arg("persistence").arg(sample_path);
     cmd.assert()
@@ -279,7 +279,7 @@ fn persistence_without_findings() -> Result<(), Box<dyn std::error::Error>> {
 fn process_requires_a_selector() -> Result<(), Box<dyn std::error::Error>> {
     let root = env!("CARGO_MANIFEST_DIR");
     let sample_path = Path::new(root).join("tests/evtx");
-    let mut cmd = cargo_bin_cmd!("chainsaw");
+    let mut cmd = cargo_bin_cmd!("rockwheel");
 
     cmd.arg("--no-banner").arg("process").arg(sample_path);
     cmd.assert()

@@ -8,6 +8,10 @@ readme = "README.md"
 license = "GPL3"
 edition = "2024"
 
+[[bin]]
+name = "rockwheel"
+path = "src/main.rs"
+
 
 [dependencies]
 aho-corasick = "1.0"
