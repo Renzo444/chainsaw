@@ -16,7 +16,7 @@ use chrono_tz::Tz;
 use clap::{ArgAction, CommandFactory, Parser, Subcommand};
 
 use chainsaw::{
-    Document, EvtxAnalyser, findings, Filter, Format, GapAnalyser, Hunter, Reader, RuleKind, RuleLevel,
+    Document, EvtxAnalyser, findings, ioc, Filter, Format, GapAnalyser, Hunter, Reader, RuleKind, RuleLevel,
     RuleStatus, Searcher, ShimcacheAnalyser, SrumAnalyser, Writer, cli, flatten_gaps_for_json,
     get_files, lint as lint_rule, load as load_rule, print_evtx_text_report, print_gap_text_report,
     set_writer,
@@ -304,8 +304,102 @@ enum Command {
         cmd: AnalyseCommand,
     },
 
+    /// Sweep event logs for indicators of compromise: process names, hashes, IPs and domains.
+    Ioc {
+        /// The paths containing event logs to sweep.
+        path: Vec<PathBuf>,
+        /// An indicator to look for, e.g. mimikatz.exe, evil.com, 10.1.2.3 or a file hash.
+        #[arg(short = 'i', long = "ioc", number_of_values = 1)]
+        ioc: Vec<String>,
+        /// A file of indicators, one per line as: value[,severity[,note]].
+        #[arg(short = 'f', long = "ioc-file", number_of_values = 1)]
+        ioc_file: Vec<PathBuf>,
+        #[command(flatten)]
+        window: WindowArgs,
+        #[command(flatten)]
+        report: ReportArgs,
+    },
+
     /// Launch the interactive menu to build and run any of the operations above.
     Menu,
+}
+
+#[derive(clap::Args)]
+struct WindowArgs {
+    /// Only look at the most recent period, e.g. 24h, 48h or 7d. The window ends now, or at
+    /// --anchor when provided.
+    #[arg(long = "last", value_name = "DURATION", conflicts_with_all = ["from", "to"])]
+    last: Option<String>,
+    /// The end of the --last window instead of now (YYYY-MM-ddTHH:mm:SS), e.g. the time the
+    /// evidence was collected.
+    #[arg(long = "anchor", requires = "last")]
+    anchor: Option<NaiveDateTime>,
+    /// Drop events older than this timestamp (YYYY-MM-ddTHH:mm:SS).
+    #[arg(long = "from")]
+    from: Option<NaiveDateTime>,
+    /// Drop events newer than this timestamp (YYYY-MM-ddTHH:mm:SS).
+    #[arg(long = "to")]
+    to: Option<NaiveDateTime>,
+    /// Interpret the timestamps above in the local machine's timezone.
+    #[arg(long = "local", group = "tz")]
+    local: bool,
+    /// Interpret the timestamps above in the timezone provided.
+    #[arg(long = "timezone", group = "tz")]
+    timezone: Option<Tz>,
+}
+
+impl WindowArgs {
+    fn resolve(&self) -> Result<Window> {
+        Window::resolve(
+            self.from,
+            self.to,
+            self.last.as_deref(),
+            self.anchor,
+            self.timezone,
+            self.local,
+        )
+    }
+}
+
+#[derive(clap::Args)]
+struct ReportArgs {
+    /// Print the output in json format.
+    #[arg(group = "format", short = 'j', long = "json")]
+    json: bool,
+    /// Write a Markdown report, ranked by severity and impact.
+    #[arg(group = "format", long = "markdown")]
+    markdown: bool,
+    /// A path to output results to.
+    #[arg(short = 'o', long = "output")]
+    output: Option<PathBuf>,
+    /// Suppress informational output.
+    #[arg(short = 'q')]
+    quiet: bool,
+    /// Continue when an error is encountered.
+    #[arg(long = "skip-errors")]
+    skip_errors: bool,
+}
+
+impl ReportArgs {
+    fn init(&self, verbose: u8) -> Result<()> {
+        init_writer(self.output.clone(), false, self.json, self.quiet, verbose)
+    }
+
+    fn format(&self) -> ioc::Output {
+        if self.json {
+            ioc::Output::Json
+        } else if self.markdown {
+            ioc::Output::Markdown
+        } else {
+            ioc::Output::Std
+        }
+    }
+
+    fn done(&self) {
+        if let Some(output) = &self.output {
+            cs_eprintln!("[+] Wrote results to {}", output.display());
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -1404,6 +1498,30 @@ fn run() -> Result<()> {
                     }
                 }
             }
+        }
+        Command::Ioc {
+            path,
+            ioc,
+            ioc_file,
+            window,
+            report,
+        } => {
+            report.init(args.verbose)?;
+            if !args.no_banner {
+                print_title();
+            }
+            let mut iocs: Vec<_> = ioc.iter().filter_map(|i| ioc::parse_line(i)).collect();
+            for file in &ioc_file {
+                iocs.extend(ioc::load_file(file)?);
+            }
+            ioc::run(ioc::Options {
+                paths: path,
+                iocs,
+                window: window.resolve()?,
+                output: report.format(),
+                skip_errors: report.skip_errors,
+            })?;
+            report.done();
         }
         Command::Menu => unreachable!("handled above"),
     }
