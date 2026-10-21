@@ -26,6 +26,7 @@ pub mod bundle;
 pub mod cli;
 mod ext;
 mod file;
+pub mod findings;
 mod hunt;
 pub mod rule;
 mod search;

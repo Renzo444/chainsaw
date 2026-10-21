@@ -353,18 +353,9 @@ pub fn print_log(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn print_detections(
-    detections: &[Detections],
-    hunts: &[Hunt],
-    rules: &BTreeMap<Uuid, Rule>,
-    column_width: u32,
-    full: bool,
-    local: bool,
-    metadata: bool,
-    timezone: Option<Tz>,
-) {
-    let format = format::FormatBuilder::new()
+/// The box-drawn table style used for tabular output.
+pub fn table_format() -> format::TableFormat {
+    format::FormatBuilder::new()
         .column_separator('│')
         .borders('│')
         .separators(
@@ -380,7 +371,21 @@ pub fn print_detections(
             format::LineSeparator::new('─', '┴', '└', '┘'),
         )
         .padding(1, 1)
-        .build();
+        .build()
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn print_detections(
+    detections: &[Detections],
+    hunts: &[Hunt],
+    rules: &BTreeMap<Uuid, Rule>,
+    column_width: u32,
+    full: bool,
+    local: bool,
+    metadata: bool,
+    timezone: Option<Tz>,
+) {
+    let format = table_format();
 
     // Build headers
     let mut headers: HashMap<&String, (Vec<String>, HashSet<String>)> = HashMap::new();
@@ -1015,6 +1020,19 @@ pub fn print_json(
     local: bool,
     timezone: Option<Tz>,
 ) -> crate::Result<()> {
+    let detections = build_detections(detections, hunts, rules, local, timezone);
+    cs_print_json!(&detections)?;
+    Ok(())
+}
+
+/// Flattens the hunt results into one serialisable detection per hit, sorted by time.
+pub fn build_detections<'a>(
+    detections: &'a [Detections],
+    hunts: &'a [Hunt],
+    rules: &'a BTreeMap<Uuid, Rule>,
+    local: bool,
+    timezone: Option<Tz>,
+) -> Vec<Detection<'a>> {
     let hunts: HashMap<_, _> = hunts.iter().map(|h| (&h.id, h)).collect();
     let mut detections = detections
         .iter()
@@ -1070,8 +1088,7 @@ pub fn print_json(
         })
         .collect::<Vec<Detection>>();
     detections.sort_by(|x, y| x.timestamp.cmp(&y.timestamp));
-    cs_print_json!(&detections)?;
-    Ok(())
+    detections
 }
 
 pub fn print_jsonl(

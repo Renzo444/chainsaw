@@ -16,7 +16,7 @@ use chrono_tz::Tz;
 use clap::{ArgAction, CommandFactory, Parser, Subcommand};
 
 use chainsaw::{
-    Document, EvtxAnalyser, Filter, Format, GapAnalyser, Hunter, Reader, RuleKind, RuleLevel,
+    Document, EvtxAnalyser, findings, Filter, Format, GapAnalyser, Hunter, Reader, RuleKind, RuleLevel,
     RuleStatus, Searcher, ShimcacheAnalyser, SrumAnalyser, Writer, cli, flatten_gaps_for_json,
     get_files, lint as lint_rule, load as load_rule, print_evtx_text_report, print_gap_text_report,
     set_writer,
@@ -170,6 +170,9 @@ enum Command {
         /// Print the output in log like format.
         #[arg(group = "format", long = "log")]
         log: bool,
+        /// Write a Markdown report of the findings, ranked by severity and impact.
+        #[arg(group = "format", long = "markdown", conflicts_with = "cache")]
+        markdown: bool,
         /// (BETA) Enable preprocessing, which can result in increased performance.
         #[arg(long = "preprocess")]
         preprocess: bool,
@@ -439,6 +442,14 @@ fn resolve_col_width() -> Option<u32> {
     }
 }
 
+fn window_text(window: &Window) -> String {
+    if window.is_open() {
+        "All time".to_string()
+    } else {
+        window.describe()
+    }
+}
+
 fn init_writer(
     output: Option<PathBuf>,
     csv: bool,
@@ -631,6 +642,7 @@ fn run() -> Result<()> {
             metadata,
             output,
             log,
+            markdown,
             preprocess,
             quiet,
             sigma,
@@ -647,6 +659,7 @@ fn run() -> Result<()> {
                 from = window.from.map(|t| delocalise(&t, timezone, local));
                 to = window.to.map(|t| delocalise(&t, timezone, local));
             }
+            let window = Window::resolve(from, to, None, None, timezone, local)?;
             if column_width.is_none() {
                 column_width = resolve_col_width();
             }
@@ -922,7 +935,7 @@ fn run() -> Result<()> {
                 // Work already done
             } else if log {
                 cli::print_log(&detections, hunter.hunts(), hunter.rules(), local, timezone)?;
-            } else {
+            } else if !markdown {
                 cli::print_detections(
                     &detections,
                     hunter.hunts(),
@@ -933,6 +946,45 @@ fn run() -> Result<()> {
                     metadata,
                     timezone,
                 );
+            }
+            if markdown || !(csv || json || jsonl || log) {
+                let serialised = cli::build_detections(
+                    &detections,
+                    hunter.hunts(),
+                    hunter.rules(),
+                    local,
+                    timezone,
+                )
+                .iter()
+                .map(serde_json::to_value)
+                .collect::<Result<Vec<_>, _>>()?;
+                let findings = findings::from_detections(&serialised);
+                if markdown {
+                    let report = findings::Report {
+                        title: "Chainsaw hunt report".to_string(),
+                        meta: vec![
+                            (
+                                "Evidence".to_string(),
+                                path.iter()
+                                    .map(|p| p.display().to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(", "),
+                            ),
+                            ("Time window".to_string(), window_text(&window)),
+                            ("Detection rules".to_string(), count.to_string()),
+                            ("Artefacts".to_string(), files.len().to_string()),
+                        ],
+                        findings,
+                        sections: vec![],
+                    };
+                    cs_print!("{}", report.to_markdown());
+                    if let Some(output) = &output {
+                        cs_eprintln!("[+] Wrote Markdown report to {}", output.display());
+                    }
+                } else if !findings.is_empty() {
+                    cs_eprintln!("\n[+] Findings ranked by severity and impact:");
+                    findings::print_table(&findings);
+                }
             }
             cs_eprintln!("\n[+] {} Detections found on {} documents", hits, documents,);
         }
