@@ -10,6 +10,7 @@ use std::path::{MAIN_SEPARATOR, Path, PathBuf};
 use std::process::Command as Process;
 
 use anyhow::Result;
+use chainsaw::window::PRESETS;
 use clap::{Arg, ArgAction, Command};
 use ratatui::{
     DefaultTerminal, Frame,
@@ -28,11 +29,19 @@ const HIDDEN: &[&str] = &["menu", "help"];
 fn known_choices(id: &str) -> Option<Vec<String>> {
     let choices: &[&str] = match id {
         "kind" => &["chainsaw", "sigma"],
-        "level" => &["critical", "high", "medium", "low", "info"],
+        "level" | "min_level" => &["critical", "high", "medium", "low", "info"],
         "status" => &["stable", "experimental"],
         _ => return None,
     };
     Some(choices.iter().map(|s| s.to_string()).collect())
+}
+
+/// Presets for arguments that also accept a custom value.
+fn preset_choices(id: &str) -> Option<Vec<String>> {
+    match id {
+        "last" => Some(PRESETS.iter().map(|s| s.to_string()).collect()),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -45,6 +54,8 @@ enum Kind {
     Choice {
         choices: Vec<String>,
         multiple: bool,
+        /// Whether a value other than the choices may be typed in.
+        custom: bool,
     },
 }
 
@@ -81,14 +92,27 @@ impl Field {
                     .iter()
                     .map(|v| v.get_name().to_string())
                     .collect();
-                let choices = if possible.is_empty() {
-                    known_choices(arg.get_id().as_str())
+                let id = arg.get_id().as_str();
+                if let Some(choices) = preset_choices(id) {
+                    Kind::Choice {
+                        choices,
+                        multiple,
+                        custom: true,
+                    }
                 } else {
-                    Some(possible)
-                };
-                match choices {
-                    Some(choices) => Kind::Choice { choices, multiple },
-                    None => Kind::Text { multiple },
+                    let choices = if possible.is_empty() {
+                        known_choices(id)
+                    } else {
+                        Some(possible)
+                    };
+                    match choices {
+                        Some(choices) => Kind::Choice {
+                            choices,
+                            multiple,
+                            custom: false,
+                        },
+                        None => Kind::Text { multiple },
+                    }
                 }
             }
             // Help, version and anything else we do not know how to drive.
@@ -153,7 +177,7 @@ impl Field {
             Kind::Flag => self.on,
             Kind::Count => self.count > 0,
             Kind::Text { .. } => !self.text.trim().is_empty(),
-            Kind::Choice { .. } => self.picked.iter().any(|p| *p),
+            Kind::Choice { .. } => !self.values().is_empty(),
         }
     }
 
@@ -170,12 +194,21 @@ impl Field {
             Kind::Text { multiple: true } => split_words(&self.text),
             Kind::Text { multiple: false } if self.text.trim().is_empty() => vec![],
             Kind::Text { multiple: false } => vec![self.text.trim().to_string()],
-            Kind::Choice { choices, .. } => choices
-                .iter()
-                .zip(&self.picked)
-                .filter(|(_, p)| **p)
-                .map(|(c, _)| c.clone())
-                .collect(),
+            Kind::Choice {
+                choices, custom, ..
+            } => {
+                let picked: Vec<String> = choices
+                    .iter()
+                    .zip(&self.picked)
+                    .filter(|(_, p)| **p)
+                    .map(|(c, _)| c.clone())
+                    .collect();
+                if picked.is_empty() && *custom && !self.text.trim().is_empty() {
+                    vec![self.text.trim().to_string()]
+                } else {
+                    picked
+                }
+            }
             _ => vec![],
         }
     }
@@ -197,10 +230,15 @@ impl Field {
             Kind::Text { multiple: true } => {
                 hints.push("multiple values, space separated (quote values with spaces)".into())
             }
-            Kind::Choice { choices, multiple } => hints.push(format!(
-                "{}: {}",
+            Kind::Choice {
+                choices,
+                multiple,
+                custom,
+            } => hints.push(format!(
+                "{}: {}{}",
                 if *multiple { "pick any" } else { "pick one" },
-                choices.join(", ")
+                choices.join(", "),
+                if *custom { ", or a custom value" } else { "" }
             )),
             _ => {}
         }
@@ -262,7 +300,7 @@ impl Operation {
     }
 
     fn preview(&self) -> String {
-        std::iter::once("chainsaw".to_string())
+        std::iter::once("rockwheel".to_string())
             .chain(self.argv().iter().map(|a| quote(a)))
             .collect::<Vec<_>>()
             .join(" ")
@@ -306,7 +344,46 @@ fn operations(root: &Command) -> Vec<Operation> {
         }
     }
     walk(root, vec![], &globals, &mut ops);
+    // List operations in the order an investigation usually runs; anything new goes last.
+    ops.sort_by_key(|op| {
+        ORDER
+            .iter()
+            .position(|o| *o == op.name())
+            .unwrap_or(ORDER.len())
+    });
     ops
+}
+
+/// The order operations are listed in the menu.
+const ORDER: &[&str] = &[
+    "hunt",
+    "persistence",
+    "ioc",
+    "process",
+    "search",
+    "analyse evtx",
+    "analyse gaps",
+    "analyse shimcache",
+    "analyse srum",
+    "dump",
+    "lint",
+];
+
+/// Greedy word wrap to `width` columns. Words longer than a line are left whole.
+fn wrap_words(text: &str, width: usize) -> Vec<String> {
+    let mut lines = vec![String::new()];
+    for word in text.split_whitespace() {
+        let line = lines.last_mut().expect("never empty");
+        if line.is_empty() {
+            line.push_str(word);
+        } else if line.chars().count() + 1 + word.chars().count() <= width {
+            line.push(' ');
+            line.push_str(word);
+        } else {
+            lines.push(word.to_string());
+        }
+    }
+    lines
 }
 
 /// Splits a string into words on whitespace, honouring single and double quotes. Backslashes
@@ -502,7 +579,7 @@ impl App {
     }
 
     fn validate(&self) -> std::result::Result<(), String> {
-        let mut argv = vec!["chainsaw".to_string()];
+        let mut argv = vec!["rockwheel".to_string()];
         argv.extend(self.op().argv());
         self.root
             .clone()
@@ -602,7 +679,7 @@ impl App {
                     cmd = cmd.find_subcommand_mut(p).expect("subcommand exists");
                 }
                 self.popup = Popup::Message {
-                    title: format!("chainsaw {} --help", self.op().name()),
+                    title: format!("rockwheel {} --help", self.op().name()),
                     body: cmd.render_long_help().to_string(),
                     scroll: 0,
                 };
@@ -667,10 +744,24 @@ impl App {
         let i = state.selected().unwrap_or(0);
         let row = self.form.selected().unwrap_or(0);
         let field = &mut self.ops[self.op].fields[row];
-        let Kind::Choice { choices, multiple } = &field.kind else {
+        let Kind::Choice {
+            choices,
+            multiple,
+            custom,
+        } = &field.kind
+        else {
             return;
         };
-        let len = choices.len();
+        let len = choices.len() + usize::from(*custom);
+        if *custom && i == choices.len() && matches!(key.code, KeyCode::Enter | KeyCode::Char(' '))
+        {
+            self.editor = Some(Editor {
+                cursor: field.text.len(),
+                text: field.text.clone(),
+            });
+            self.popup = Popup::None;
+            return;
+        }
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => state.select(Some((i + len - 1) % len)),
             KeyCode::Down | KeyCode::Char('j') => state.select(Some((i + 1) % len)),
@@ -679,6 +770,7 @@ impl App {
                 let was = field.picked[i];
                 field.picked.iter_mut().for_each(|p| *p = false);
                 field.picked[i] = !was;
+                field.text.clear();
                 self.popup = Popup::None;
             }
             KeyCode::Enter | KeyCode::Esc => self.popup = Popup::None,
@@ -696,7 +788,10 @@ impl App {
             KeyCode::Esc => self.editor = None,
             KeyCode::Enter => {
                 let text = editor.text.clone();
-                self.ops[self.op].fields[row].text = text;
+                let field = &mut self.ops[self.op].fields[row];
+                field.text = text;
+                // A custom value replaces any picked choice.
+                field.picked.iter_mut().for_each(|p| *p = false);
                 self.editor = None;
             }
             KeyCode::Tab => {
@@ -750,16 +845,37 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        let [header, body, footer] = Layout::vertical([
+        // The full block-letter banner only on the main screen, and only when it leaves room.
+        let area = frame.area();
+        let art = matches!(self.screen, Screen::Main)
+            && area.height >= 32
+            && area.width as usize >= crate::banner::width(crate::banner::WORD) + 2;
+        let banner_height = if art {
+            crate::banner::WORD.lines().count() as u16 + 1
+        } else {
+            0
+        };
+        let [banner, header, body, footer] = Layout::vertical([
+            Constraint::Length(banner_height),
             Constraint::Length(1),
             Constraint::Min(5),
             Constraint::Length(1),
         ])
-        .areas(frame.area());
+        .areas(area);
+        if art {
+            let lines: Vec<Line> = crate::banner::WORD
+                .lines()
+                .map(|l| Line::from(format!(" {}", l)).green().bold())
+                .collect();
+            frame.render_widget(Text::from(lines), banner);
+        }
         frame.render_widget(
             Line::from(vec![
-                Span::styled(" CHAINSAW ", Style::new().black().on_green().bold()),
-                Span::raw(format!(" {} · interactive menu", env!("CARGO_PKG_VERSION"))),
+                Span::styled(" ROCKWHEEL ", Style::new().black().on_green().bold()),
+                Span::raw(format!(
+                    " {} · interactive menu · built on Chainsaw",
+                    env!("CARGO_PKG_VERSION")
+                )),
             ]),
             header,
         );
@@ -811,7 +927,9 @@ impl App {
         let text = match self.ops.get(i) {
             Some(op) => {
                 let mut lines = vec![
-                    Line::from(format!("chainsaw {}", op.name())).bold().green(),
+                    Line::from(format!("rockwheel {}", op.name()))
+                        .bold()
+                        .green(),
                     Line::from(op.about.clone()),
                 ];
                 let mut heading = "";
@@ -821,10 +939,15 @@ impl App {
                         lines.push(Line::from(""));
                         lines.push(Line::from(heading.to_string()).underlined());
                     }
-                    lines.push(Line::from(vec![
-                        Span::styled(format!("  {:<28}", f.label), Style::new().cyan()),
-                        Span::raw(f.help.clone()),
-                    ]));
+                    // Wrap the help ourselves so continuation lines stay under the description.
+                    let room = (right.width as usize).saturating_sub(2 + 30).max(20);
+                    for (n, chunk) in wrap_words(&f.help, room).into_iter().enumerate() {
+                        let label = if n == 0 { f.label.as_str() } else { "" };
+                        lines.push(Line::from(vec![
+                            Span::styled(format!("  {:<28}", label), Style::new().cyan()),
+                            Span::raw(chunk),
+                        ]));
+                    }
                 }
                 Text::from(lines)
             }
@@ -912,7 +1035,7 @@ impl App {
             .block(
                 Block::bordered()
                     .border_type(BorderType::Rounded)
-                    .title(format!(" chainsaw {} ", op.name()))
+                    .title(format!(" rockwheel {} ", op.name()))
                     .title_bottom(Line::from(format!(" {} ", op.about)).dark_gray()),
             )
             .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
@@ -980,10 +1103,15 @@ impl App {
             Popup::Picker { state } => {
                 let row = self.form.selected().unwrap_or(0);
                 let field = &self.ops[self.op].fields[row];
-                let Kind::Choice { choices, multiple } = &field.kind else {
+                let Kind::Choice {
+                    choices,
+                    multiple,
+                    custom,
+                } = &field.kind
+                else {
                     return;
                 };
-                let items: Vec<ListItem> = choices
+                let mut items: Vec<ListItem> = choices
                     .iter()
                     .zip(&field.picked)
                     .map(|(c, p)| {
@@ -996,7 +1124,22 @@ impl App {
                         ListItem::new(format!(" {} {}", mark, c))
                     })
                     .collect();
-                let popup = centered(area, 40, choices.len() as u16 + 2);
+                if *custom {
+                    let current = if field.picked.iter().any(|p| *p) {
+                        String::new()
+                    } else {
+                        field.text.clone()
+                    };
+                    items.push(ListItem::new(format!(
+                        " ✎  Custom… {}",
+                        if current.is_empty() {
+                            String::new()
+                        } else {
+                            format!("({})", current)
+                        }
+                    )));
+                }
+                let popup = centered(area, 40, items.len() as u16 + 2);
                 frame.render_widget(Clear, popup);
                 frame.render_stateful_widget(
                     List::new(items)
@@ -1036,7 +1179,7 @@ fn execute(exe: &Path, op: &Operation) -> Result<()> {
             Some(code) => writeln!(stdout, "\n[x] Exited with status {}", code)?,
             None => writeln!(stdout, "\n[x] Interrupted")?,
         },
-        Err(e) => writeln!(stdout, "\n[x] Failed to start chainsaw - {}", e)?,
+        Err(e) => writeln!(stdout, "\n[x] Failed to start rockwheel - {}", e)?,
     }
     write!(stdout, "Press Enter to return to the menu...")?;
     stdout.flush()?;
@@ -1125,9 +1268,19 @@ mod tests {
     }
 
     #[test]
+    fn wraps_words_to_width() {
+        assert_eq!(
+            wrap_words("one two three four", 9),
+            vec!["one two", "three", "four"]
+        );
+        assert_eq!(wrap_words("", 9), vec![""]);
+    }
+
+    #[test]
     fn lists_nested_operations_and_hides_menu() {
         let names: Vec<String> = ops().iter().map(|o| o.name()).collect();
         assert_eq!(names, vec!["hunt", "analyse gaps"]);
+        assert!(ORDER.contains(&"persistence"));
     }
 
     #[test]
@@ -1194,7 +1347,7 @@ mod tests {
             ]
         );
         use clap::CommandFactory;
-        let mut full = vec!["chainsaw".to_string()];
+        let mut full = vec!["rockwheel".to_string()];
         full.extend(argv);
         assert!(Root::command().try_get_matches_from(full).is_ok());
         assert!(

@@ -17,38 +17,43 @@ use clap::{ArgAction, CommandFactory, Parser, Subcommand};
 
 use chainsaw::{
     Document, EvtxAnalyser, Filter, Format, GapAnalyser, Hunter, Reader, RuleKind, RuleLevel,
-    RuleStatus, Searcher, ShimcacheAnalyser, SrumAnalyser, Writer, cli, flatten_gaps_for_json,
-    get_files, lint as lint_rule, load as load_rule, print_evtx_text_report, print_gap_text_report,
-    set_writer,
+    RuleStatus, Searcher, ShimcacheAnalyser, SrumAnalyser, Writer, cli, findings,
+    flatten_gaps_for_json, get_files, ioc, lint as lint_rule, load as load_rule, persistence,
+    print_evtx_text_report, print_gap_text_report, process, set_writer,
+    window::{Window, delocalise},
 };
 
+/// The field holding the timestamp of an event log record.
+const EVTX_TIMESTAMP: &str = "Event.System.TimeCreated_attributes.SystemTime";
+
+mod banner;
 mod menu;
 
 #[derive(Parser)]
 #[clap(
-    name = "chainsaw",
-    about = "Rapidly work with Forensic Artefacts",
+    name = "rockwheel",
+    about = "Rockwheel - rapidly hunt through forensic artefacts (built on Chainsaw)",
     after_help = r"Examples:
 
     Hunt with Sigma and Chainsaw Rules:
-        ./chainsaw hunt evtx_attack_samples/ -s sigma/ --mapping mappings/sigma-event-logs-all.yml -r rules/
+        ./rockwheel hunt evtx_attack_samples/ -s sigma/ --mapping mappings/sigma-event-logs-all.yml -r rules/
 
     Hunt with Sigma rules and output in JSON:
-        ./chainsaw hunt evtx_attack_samples/ -s sigma/ --mapping mappings/sigma-event-logs-all.yml --json
+        ./rockwheel hunt evtx_attack_samples/ -s sigma/ --mapping mappings/sigma-event-logs-all.yml --json
 
     Search for the case-insensitive word 'mimikatz':
-        ./chainsaw search mimikatz -i evtx_attack_samples/
+        ./rockwheel search mimikatz -i evtx_attack_samples/
 
     Search for Powershell Script Block Events (EventID 4014):
-        ./chainsaw search -t 'Event.System.EventID: =4104' evtx_attack_samples/
+        ./rockwheel search -t 'Event.System.EventID: =4104' evtx_attack_samples/
 
     Launch the interactive menu (also launched when run without arguments):
-        ./chainsaw menu
+        ./rockwheel menu
     ",
     version
 )]
 struct Args {
-    /// Hide Chainsaw's banner.
+    /// Hide the Rockwheel banner.
     #[arg(long)]
     no_banner: bool,
     /// Limit the thread number (default: num of CPUs)
@@ -74,7 +79,7 @@ enum Command {
         /// Print the output in jsonl format.
         #[arg(group = "format", long = "jsonl")]
         jsonl: bool,
-        /// Allow chainsaw to try and load files it cannot identify.
+        /// Allow Rockwheel to try and load files it cannot identify.
         #[arg(long = "load-unknown")]
         load_unknown: bool,
         /// Only dump files with the provided extension.
@@ -101,7 +106,8 @@ enum Command {
 
     /// Hunt through artefacts using detection rules for threat detection.
     Hunt {
-        /// The path to a collection of rules to use for hunting.
+        /// The path to a collection of rules to use for hunting. When no rules are given, the
+        /// bundled Chainsaw and Sigma rules are used and a single path is treated as the evidence.
         rules: Option<PathBuf>,
 
         /// The paths containing files to load and hunt through.
@@ -150,7 +156,7 @@ enum Command {
         /// Restrict loaded rules to specified levels.
         #[arg(long = "level", number_of_values = 1)]
         level: Vec<RuleLevel>,
-        /// Allow chainsaw to try and load files it cannot identify.
+        /// Allow Rockwheel to try and load files it cannot identify.
         #[arg(long = "load-unknown")]
         load_unknown: bool,
         /// Output the timestamp using the local machine's timestamp.
@@ -165,20 +171,22 @@ enum Command {
         /// Print the output in log like format.
         #[arg(group = "format", long = "log")]
         log: bool,
+        /// Write a Markdown report of the findings, ranked by severity and impact.
+        #[arg(group = "format", long = "markdown", conflicts_with = "cache")]
+        markdown: bool,
         /// (BETA) Enable preprocessing, which can result in increased performance.
         #[arg(long = "preprocess")]
         preprocess: bool,
         /// Suppress informational output.
         #[arg(short = 'q')]
         quiet: bool,
-        /// A path containing Sigma rules to hunt with.
-        #[arg(
-            short = 's',
-            long = "sigma",
-            number_of_values = 1,
-            requires = "mapping"
-        )]
+        /// A path containing Sigma rules to hunt with. Uses the bundled event log mapping unless
+        /// --mapping is provided.
+        #[arg(short = 's', long = "sigma", number_of_values = 1)]
         sigma: Option<Vec<PathBuf>>,
+        /// Also hunt with the bundled Chainsaw and Sigma rules (the default when no rules are given).
+        #[arg(long = "bundled")]
+        bundled: bool,
         /// Continue to hunt when an error is encountered.
         #[arg(long = "skip-errors")]
         skip_errors: bool,
@@ -192,6 +200,14 @@ enum Command {
         /// (YYYY-MM-ddTHH:mm:SS)
         #[arg(long = "to")]
         to: Option<NaiveDateTime>,
+        /// Only look at the most recent period, e.g. 24h, 48h or 7d. The window ends now, or at
+        /// --anchor when provided.
+        #[arg(long = "last", value_name = "DURATION", conflicts_with_all = ["from", "to"])]
+        last: Option<String>,
+        /// The end of the --last window instead of now (YYYY-MM-ddTHH:mm:SS), e.g. the time the
+        /// evidence was collected.
+        #[arg(long = "anchor", requires = "last")]
+        anchor: Option<NaiveDateTime>,
     },
 
     /// Lint provided rules to ensure that they load correctly
@@ -241,7 +257,7 @@ enum Command {
         /// Print the output in jsonl format.
         #[arg(group = "format", long = "jsonl")]
         jsonl: bool,
-        /// Allow chainsaw to try and load files it cannot identify.
+        /// Allow Rockwheel to try and load files it cannot identify.
         #[arg(long = "load-unknown")]
         load_unknown: bool,
         /// Output the timestamp using the local machine's timestamp.
@@ -273,6 +289,14 @@ enum Command {
         /// (YYYY-MM-ddTHH:mm:SS)
         #[arg(long = "to", requires = "timestamp")]
         to: Option<NaiveDateTime>,
+        /// Only look at the most recent period, e.g. 24h, 48h or 7d. The window ends now, or at
+        /// --anchor when provided. Uses the event log timestamp unless --timestamp is set.
+        #[arg(long = "last", value_name = "DURATION", conflicts_with_all = ["from", "to"])]
+        last: Option<String>,
+        /// The end of the --last window instead of now (YYYY-MM-ddTHH:mm:SS), e.g. the time the
+        /// evidence was collected.
+        #[arg(long = "anchor", requires = "last")]
+        anchor: Option<NaiveDateTime>,
     },
 
     /// Perform various analyses on artefacts
@@ -281,8 +305,148 @@ enum Command {
         cmd: AnalyseCommand,
     },
 
+    /// Sweep event logs for indicators of compromise: process names, hashes, IPs and domains.
+    Ioc {
+        /// The paths containing event logs to sweep.
+        path: Vec<PathBuf>,
+        /// An indicator to look for, e.g. mimikatz.exe, evil.com, 10.1.2.3 or a file hash.
+        #[arg(short = 'i', long = "ioc", number_of_values = 1)]
+        ioc: Vec<String>,
+        /// A file of indicators, one per line as: value[,severity[,note]].
+        #[arg(short = 'f', long = "ioc-file", number_of_values = 1)]
+        ioc_file: Vec<PathBuf>,
+        #[command(flatten)]
+        window: WindowArgs,
+        #[command(flatten)]
+        report: ReportArgs,
+    },
+
+    /// Drill into a process: show its process tree, parents and children, and a timeline of what
+    /// they did (needs Sysmon or Security 4688 process creation logs).
+    Process {
+        /// The paths containing event logs.
+        path: Vec<PathBuf>,
+        /// Match processes whose image or command line contains this text, e.g. powershell.exe.
+        #[arg(short = 'n', long = "name", number_of_values = 1)]
+        name: Vec<String>,
+        /// Match processes by process id (decimal or 0x hex).
+        #[arg(short = 'p', long = "pid", number_of_values = 1, value_parser = process::parse_pid_arg)]
+        pid: Vec<u64>,
+        /// Match processes by Sysmon ProcessGuid.
+        #[arg(short = 'g', long = "guid", number_of_values = 1)]
+        guid: Vec<String>,
+        /// Only match processes on hosts whose name contains this text.
+        #[arg(long = "host")]
+        host: Option<String>,
+        /// How many levels of child processes to follow.
+        #[arg(long = "depth", default_value_t = 10)]
+        depth: usize,
+        /// Leave out network, DNS, file and registry activity from the timeline.
+        #[arg(long = "no-activity")]
+        no_activity: bool,
+        #[command(flatten)]
+        window: WindowArgs,
+        #[command(flatten)]
+        report: ReportArgs,
+    },
+
+    /// Sweep for the most common persistence mechanisms (services, scheduled tasks, Run keys, WMI,
+    /// startup folders, accounts and more) in event logs, registry hives and collected files.
+    Persistence {
+        /// The paths containing event logs, registry hives (SOFTWARE, SYSTEM, NTUSER.DAT,
+        /// UsrClass.dat) and collected files.
+        path: Vec<PathBuf>,
+        /// Only report items at or above this severity: critical, high, medium, low or info.
+        #[arg(long = "min-level")]
+        min_level: Option<RuleLevel>,
+        #[command(flatten)]
+        window: WindowArgs,
+        #[command(flatten)]
+        report: ReportArgs,
+    },
+
     /// Launch the interactive menu to build and run any of the operations above.
     Menu,
+}
+
+#[derive(clap::Args)]
+#[command(next_help_heading = "Time Window")]
+struct WindowArgs {
+    /// Only look at the most recent period, e.g. 24h, 48h or 7d. The window ends now, or at
+    /// --anchor when provided.
+    #[arg(long = "last", value_name = "DURATION", conflicts_with_all = ["from", "to"])]
+    last: Option<String>,
+    /// The end of the --last window instead of now (YYYY-MM-ddTHH:mm:SS), e.g. the time the
+    /// evidence was collected.
+    #[arg(long = "anchor", requires = "last")]
+    anchor: Option<NaiveDateTime>,
+    /// Drop events older than this timestamp (YYYY-MM-ddTHH:mm:SS).
+    #[arg(long = "from")]
+    from: Option<NaiveDateTime>,
+    /// Drop events newer than this timestamp (YYYY-MM-ddTHH:mm:SS).
+    #[arg(long = "to")]
+    to: Option<NaiveDateTime>,
+    /// Interpret the timestamps above in the local machine's timezone.
+    #[arg(long = "local", group = "tz")]
+    local: bool,
+    /// Interpret the timestamps above in the timezone provided.
+    #[arg(long = "timezone", group = "tz")]
+    timezone: Option<Tz>,
+}
+
+impl WindowArgs {
+    fn resolve(&self) -> Result<Window> {
+        Window::resolve(
+            self.from,
+            self.to,
+            self.last.as_deref(),
+            self.anchor,
+            self.timezone,
+            self.local,
+        )
+    }
+}
+
+#[derive(clap::Args)]
+#[command(next_help_heading = "Output")]
+struct ReportArgs {
+    /// Print the output in json format.
+    #[arg(group = "format", short = 'j', long = "json")]
+    json: bool,
+    /// Write a Markdown report, ranked by severity and impact.
+    #[arg(group = "format", long = "markdown")]
+    markdown: bool,
+    /// A path to output results to.
+    #[arg(short = 'o', long = "output")]
+    output: Option<PathBuf>,
+    /// Suppress informational output.
+    #[arg(short = 'q')]
+    quiet: bool,
+    /// Continue when an error is encountered.
+    #[arg(long = "skip-errors")]
+    skip_errors: bool,
+}
+
+impl ReportArgs {
+    fn init(&self, verbose: u8) -> Result<()> {
+        init_writer(self.output.clone(), false, self.json, self.quiet, verbose)
+    }
+
+    fn format(&self) -> ioc::Output {
+        if self.json {
+            ioc::Output::Json
+        } else if self.markdown {
+            ioc::Output::Markdown
+        } else {
+            ioc::Output::Std
+        }
+    }
+
+    fn done(&self) {
+        if let Some(output) = &self.output {
+            cs_eprintln!("[+] Wrote results to {}", output.display());
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -389,17 +553,7 @@ enum AnalyseCommand {
 }
 
 fn print_title() {
-    cs_eprintln!(
-        "
- ██████╗██╗  ██╗ █████╗ ██╗███╗   ██╗███████╗ █████╗ ██╗    ██╗
-██╔════╝██║  ██║██╔══██╗██║████╗  ██║██╔════╝██╔══██╗██║    ██║
-██║     ███████║███████║██║██╔██╗ ██║███████╗███████║██║ █╗ ██║
-██║     ██╔══██║██╔══██║██║██║╚██╗██║╚════██║██╔══██║██║███╗██║
-╚██████╗██║  ██║██║  ██║██║██║ ╚████║███████║██║  ██║╚███╔███╔╝
- ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝
-    By WithSecure Countercept (@FranticTyping, @AlexKornitzer)
-"
-    );
+    cs_eprintln!("\n{}", banner::title(banner::terminal_width()));
 }
 
 fn resolve_col_width() -> Option<u32> {
@@ -416,6 +570,14 @@ fn resolve_col_width() -> Option<u32> {
         }
     } else {
         None
+    }
+}
+
+fn window_text(window: &Window) -> String {
+    if window.is_open() {
+        "All time".to_string()
+    } else {
+        window.describe()
     }
 }
 
@@ -595,6 +757,7 @@ fn run() -> Result<()> {
             mapping,
             rule,
 
+            bundled,
             load_unknown,
             cache,
             mut column_width,
@@ -610,14 +773,24 @@ fn run() -> Result<()> {
             metadata,
             output,
             log,
+            markdown,
             preprocess,
             quiet,
             sigma,
             skip_errors,
             status,
             timezone,
-            to,
+            mut to,
+            last,
+            anchor,
         } => {
+            let mut from = from;
+            if last.is_some() {
+                let window = Window::resolve(None, None, last.as_deref(), anchor, timezone, local)?;
+                from = window.from.map(|t| delocalise(&t, timezone, local));
+                to = window.to.map(|t| delocalise(&t, timezone, local));
+            }
+            let window = Window::resolve(from, to, None, None, timezone, local)?;
             if column_width.is_none() {
                 column_width = resolve_col_width();
             }
@@ -639,6 +812,32 @@ fn run() -> Result<()> {
             init_writer(output.clone(), csv, json, quiet, args.verbose)?;
             if !args.no_banner {
                 print_title();
+            }
+            let (mut rules, mut rule, mut sigma, mut mapping) = (rules, rule, sigma, mapping);
+            let implicit =
+                rule.is_none() && sigma.is_none() && (rules.is_none() || path.is_empty());
+            if bundled || implicit {
+                let bundle = chainsaw::bundle::extract()?;
+                let (chainsaw_count, sigma_count) = chainsaw::bundle::counts();
+                cs_eprintln!(
+                    "[+] Using bundled rules ({} Chainsaw, {} Sigma)",
+                    chainsaw_count,
+                    sigma_count
+                );
+                if let Some(r) = rules.take() {
+                    if path.is_empty() {
+                        path.push(r);
+                    } else {
+                        rule.get_or_insert_with(Vec::new).push(r);
+                    }
+                }
+                rule.get_or_insert_with(Vec::new).push(bundle.rules);
+                sigma.get_or_insert_with(Vec::new).push(bundle.sigma);
+                if mapping.is_none() {
+                    mapping = Some(vec![bundle.mapping]);
+                }
+            } else if sigma.is_some() && mapping.is_none() {
+                mapping = Some(vec![chainsaw::bundle::extract()?.mapping]);
             }
             let mut rs = vec![];
             if rule.is_some() || sigma.is_some() {
@@ -867,7 +1066,7 @@ fn run() -> Result<()> {
                 // Work already done
             } else if log {
                 cli::print_log(&detections, hunter.hunts(), hunter.rules(), local, timezone)?;
-            } else {
+            } else if !markdown {
                 cli::print_detections(
                     &detections,
                     hunter.hunts(),
@@ -878,6 +1077,45 @@ fn run() -> Result<()> {
                     metadata,
                     timezone,
                 );
+            }
+            if markdown || !(csv || json || jsonl || log) {
+                let serialised = cli::build_detections(
+                    &detections,
+                    hunter.hunts(),
+                    hunter.rules(),
+                    local,
+                    timezone,
+                )
+                .iter()
+                .map(serde_json::to_value)
+                .collect::<Result<Vec<_>, _>>()?;
+                let findings = findings::from_detections(&serialised);
+                if markdown {
+                    let report = findings::Report {
+                        title: "Chainsaw hunt report".to_string(),
+                        meta: vec![
+                            (
+                                "Evidence".to_string(),
+                                path.iter()
+                                    .map(|p| p.display().to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(", "),
+                            ),
+                            ("Time window".to_string(), window_text(&window)),
+                            ("Detection rules".to_string(), count.to_string()),
+                            ("Artefacts".to_string(), files.len().to_string()),
+                        ],
+                        findings,
+                        sections: vec![],
+                    };
+                    cs_print!("{}", report.to_markdown());
+                    if let Some(output) = &output {
+                        cs_eprintln!("[+] Wrote Markdown report to {}", output.display());
+                    }
+                } else if !findings.is_empty() {
+                    cs_eprintln!("\n[+] Findings ranked by severity and impact:");
+                    findings::print_table(&findings);
+                }
             }
             cs_eprintln!("\n[+] {} Detections found on {} documents", hits, documents,);
         }
@@ -964,10 +1202,21 @@ fn run() -> Result<()> {
             quiet,
             skip_errors,
             tau,
-            timestamp,
+            mut timestamp,
             timezone,
-            to,
+            mut to,
+            last,
+            anchor,
         } => {
+            let mut from = from;
+            if last.is_some() {
+                let window = Window::resolve(None, None, last.as_deref(), anchor, timezone, local)?;
+                from = window.from.map(|t| delocalise(&t, timezone, local));
+                to = window.to.map(|t| delocalise(&t, timezone, local));
+                if timestamp.is_none() {
+                    timestamp = Some(EVTX_TIMESTAMP.to_string());
+                }
+            }
             init_writer(output, false, json, quiet, args.verbose)?;
             if !args.no_banner {
                 print_title();
@@ -1286,6 +1535,80 @@ fn run() -> Result<()> {
                     }
                 }
             }
+        }
+        Command::Ioc {
+            path,
+            ioc,
+            ioc_file,
+            window,
+            report,
+        } => {
+            report.init(args.verbose)?;
+            if !args.no_banner {
+                print_title();
+            }
+            let mut iocs: Vec<_> = ioc.iter().filter_map(|i| ioc::parse_line(i)).collect();
+            for file in &ioc_file {
+                iocs.extend(ioc::load_file(file)?);
+            }
+            ioc::run(ioc::Options {
+                paths: path,
+                iocs,
+                window: window.resolve()?,
+                output: report.format(),
+                skip_errors: report.skip_errors,
+            })?;
+            report.done();
+        }
+        Command::Process {
+            path,
+            name,
+            pid,
+            guid,
+            host,
+            depth,
+            no_activity,
+            window,
+            report,
+        } => {
+            report.init(args.verbose)?;
+            if !args.no_banner {
+                print_title();
+            }
+            process::run(process::Options {
+                paths: path,
+                selector: process::Selector {
+                    names: name,
+                    pids: pid,
+                    guids: guid,
+                    host,
+                },
+                depth,
+                activity: !no_activity,
+                window: window.resolve()?,
+                output: report.format(),
+                skip_errors: report.skip_errors,
+            })?;
+            report.done();
+        }
+        Command::Persistence {
+            path,
+            min_level,
+            window,
+            report,
+        } => {
+            report.init(args.verbose)?;
+            if !args.no_banner {
+                print_title();
+            }
+            persistence::run(persistence::Options {
+                paths: path,
+                window: window.resolve()?,
+                output: report.format(),
+                skip_errors: report.skip_errors,
+                min_level,
+            })?;
+            report.done();
         }
         Command::Menu => unreachable!("handled above"),
     }

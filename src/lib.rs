@@ -22,10 +22,17 @@ pub use write::{Format, Writer, set_writer, writer};
 mod write;
 
 mod analyse;
+pub mod bundle;
 pub mod cli;
+pub mod events;
 mod ext;
 mod file;
+pub mod findings;
 mod hunt;
+pub mod ioc;
+pub mod persistence;
+pub mod process;
 pub mod rule;
 mod search;
 mod value;
+pub mod window;

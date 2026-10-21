@@ -37,4 +37,4 @@ jobs:
       # Lints against the binary built from this PR, so a rule relying on a
       # schema change in the same PR is validated against that change.
       - name: Lint detection rules
-        run: ./target/release/chainsaw --no-banner lint --kind chainsaw rules/
+        run: ./target/release/rockwheel --no-banner lint --kind chainsaw rules/
