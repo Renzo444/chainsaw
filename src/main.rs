@@ -16,7 +16,7 @@ use chrono_tz::Tz;
 use clap::{ArgAction, CommandFactory, Parser, Subcommand};
 
 use chainsaw::{
-    Document, EvtxAnalyser, findings, ioc, Filter, Format, GapAnalyser, Hunter, Reader, RuleKind, RuleLevel,
+    Document, EvtxAnalyser, findings, ioc, process, Filter, Format, GapAnalyser, Hunter, Reader, RuleKind, RuleLevel,
     RuleStatus, Searcher, ShimcacheAnalyser, SrumAnalyser, Writer, cli, flatten_gaps_for_json,
     get_files, lint as lint_rule, load as load_rule, print_evtx_text_report, print_gap_text_report,
     set_writer,
@@ -314,6 +314,35 @@ enum Command {
         /// A file of indicators, one per line as: value[,severity[,note]].
         #[arg(short = 'f', long = "ioc-file", number_of_values = 1)]
         ioc_file: Vec<PathBuf>,
+        #[command(flatten)]
+        window: WindowArgs,
+        #[command(flatten)]
+        report: ReportArgs,
+    },
+
+    /// Drill into a process: show its process tree, parents and children, and a timeline of what
+    /// they did (needs Sysmon or Security 4688 process creation logs).
+    Process {
+        /// The paths containing event logs.
+        path: Vec<PathBuf>,
+        /// Match processes whose image or command line contains this text, e.g. powershell.exe.
+        #[arg(short = 'n', long = "name", number_of_values = 1)]
+        name: Vec<String>,
+        /// Match processes by process id (decimal or 0x hex).
+        #[arg(short = 'p', long = "pid", number_of_values = 1, value_parser = process::parse_pid_arg)]
+        pid: Vec<u64>,
+        /// Match processes by Sysmon ProcessGuid.
+        #[arg(short = 'g', long = "guid", number_of_values = 1)]
+        guid: Vec<String>,
+        /// Only match processes on hosts whose name contains this text.
+        #[arg(long = "host")]
+        host: Option<String>,
+        /// How many levels of child processes to follow.
+        #[arg(long = "depth", default_value_t = 10)]
+        depth: usize,
+        /// Leave out network, DNS, file and registry activity from the timeline.
+        #[arg(long = "no-activity")]
+        no_activity: bool,
         #[command(flatten)]
         window: WindowArgs,
         #[command(flatten)]
@@ -1517,6 +1546,37 @@ fn run() -> Result<()> {
             ioc::run(ioc::Options {
                 paths: path,
                 iocs,
+                window: window.resolve()?,
+                output: report.format(),
+                skip_errors: report.skip_errors,
+            })?;
+            report.done();
+        }
+        Command::Process {
+            path,
+            name,
+            pid,
+            guid,
+            host,
+            depth,
+            no_activity,
+            window,
+            report,
+        } => {
+            report.init(args.verbose)?;
+            if !args.no_banner {
+                print_title();
+            }
+            process::run(process::Options {
+                paths: path,
+                selector: process::Selector {
+                    names: name,
+                    pids: pid,
+                    guids: guid,
+                    host,
+                },
+                depth,
+                activity: !no_activity,
                 window: window.resolve()?,
                 output: report.format(),
                 skip_errors: report.skip_errors,

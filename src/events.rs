@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use rayon::prelude::*;
 use serde::Serialize;
 use serde_json::Value as Json;
@@ -49,6 +49,16 @@ impl Event {
                 }
             }
         }
+        // Some exported logs carry a zeroed record time; Sysmon also records the time itself.
+        let timestamp = if timestamp.timestamp() <= 0 {
+            fields
+                .get("UtcTime")
+                .and_then(|t| NaiveDateTime::parse_from_str(t, "%Y-%m-%d %H:%M:%S%.f").ok())
+                .map(|t| t.and_utc())
+                .unwrap_or(timestamp)
+        } else {
+            timestamp
+        };
         Some(Self {
             timestamp,
             host: text("Computer"),
