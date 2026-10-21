@@ -10,6 +10,7 @@ use std::path::{MAIN_SEPARATOR, Path, PathBuf};
 use std::process::Command as Process;
 
 use anyhow::Result;
+use chainsaw::window::PRESETS;
 use clap::{Arg, ArgAction, Command};
 use ratatui::{
     DefaultTerminal, Frame,
@@ -28,11 +29,19 @@ const HIDDEN: &[&str] = &["menu", "help"];
 fn known_choices(id: &str) -> Option<Vec<String>> {
     let choices: &[&str] = match id {
         "kind" => &["chainsaw", "sigma"],
-        "level" => &["critical", "high", "medium", "low", "info"],
+        "level" | "min_level" => &["critical", "high", "medium", "low", "info"],
         "status" => &["stable", "experimental"],
         _ => return None,
     };
     Some(choices.iter().map(|s| s.to_string()).collect())
+}
+
+/// Presets for arguments that also accept a custom value.
+fn preset_choices(id: &str) -> Option<Vec<String>> {
+    match id {
+        "last" => Some(PRESETS.iter().map(|s| s.to_string()).collect()),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -45,6 +54,8 @@ enum Kind {
     Choice {
         choices: Vec<String>,
         multiple: bool,
+        /// Whether a value other than the choices may be typed in.
+        custom: bool,
     },
 }
 
@@ -81,14 +92,27 @@ impl Field {
                     .iter()
                     .map(|v| v.get_name().to_string())
                     .collect();
-                let choices = if possible.is_empty() {
-                    known_choices(arg.get_id().as_str())
+                let id = arg.get_id().as_str();
+                if let Some(choices) = preset_choices(id) {
+                    Kind::Choice {
+                        choices,
+                        multiple,
+                        custom: true,
+                    }
                 } else {
-                    Some(possible)
-                };
-                match choices {
-                    Some(choices) => Kind::Choice { choices, multiple },
-                    None => Kind::Text { multiple },
+                    let choices = if possible.is_empty() {
+                        known_choices(id)
+                    } else {
+                        Some(possible)
+                    };
+                    match choices {
+                        Some(choices) => Kind::Choice {
+                            choices,
+                            multiple,
+                            custom: false,
+                        },
+                        None => Kind::Text { multiple },
+                    }
                 }
             }
             // Help, version and anything else we do not know how to drive.
@@ -153,7 +177,7 @@ impl Field {
             Kind::Flag => self.on,
             Kind::Count => self.count > 0,
             Kind::Text { .. } => !self.text.trim().is_empty(),
-            Kind::Choice { .. } => self.picked.iter().any(|p| *p),
+            Kind::Choice { .. } => !self.values().is_empty(),
         }
     }
 
@@ -170,12 +194,21 @@ impl Field {
             Kind::Text { multiple: true } => split_words(&self.text),
             Kind::Text { multiple: false } if self.text.trim().is_empty() => vec![],
             Kind::Text { multiple: false } => vec![self.text.trim().to_string()],
-            Kind::Choice { choices, .. } => choices
-                .iter()
-                .zip(&self.picked)
-                .filter(|(_, p)| **p)
-                .map(|(c, _)| c.clone())
-                .collect(),
+            Kind::Choice {
+                choices, custom, ..
+            } => {
+                let picked: Vec<String> = choices
+                    .iter()
+                    .zip(&self.picked)
+                    .filter(|(_, p)| **p)
+                    .map(|(c, _)| c.clone())
+                    .collect();
+                if picked.is_empty() && *custom && !self.text.trim().is_empty() {
+                    vec![self.text.trim().to_string()]
+                } else {
+                    picked
+                }
+            }
             _ => vec![],
         }
     }
@@ -197,10 +230,15 @@ impl Field {
             Kind::Text { multiple: true } => {
                 hints.push("multiple values, space separated (quote values with spaces)".into())
             }
-            Kind::Choice { choices, multiple } => hints.push(format!(
-                "{}: {}",
+            Kind::Choice {
+                choices,
+                multiple,
+                custom,
+            } => hints.push(format!(
+                "{}: {}{}",
                 if *multiple { "pick any" } else { "pick one" },
-                choices.join(", ")
+                choices.join(", "),
+                if *custom { ", or a custom value" } else { "" }
             )),
             _ => {}
         }
@@ -306,8 +344,30 @@ fn operations(root: &Command) -> Vec<Operation> {
         }
     }
     walk(root, vec![], &globals, &mut ops);
+    // List operations in the order an investigation usually runs; anything new goes last.
+    ops.sort_by_key(|op| {
+        ORDER
+            .iter()
+            .position(|o| *o == op.name())
+            .unwrap_or(ORDER.len())
+    });
     ops
 }
+
+/// The order operations are listed in the menu.
+const ORDER: &[&str] = &[
+    "hunt",
+    "persistence",
+    "ioc",
+    "process",
+    "search",
+    "analyse evtx",
+    "analyse gaps",
+    "analyse shimcache",
+    "analyse srum",
+    "dump",
+    "lint",
+];
 
 /// Splits a string into words on whitespace, honouring single and double quotes. Backslashes
 /// are not treated as escapes so that Windows paths can be entered as-is.
@@ -667,10 +727,24 @@ impl App {
         let i = state.selected().unwrap_or(0);
         let row = self.form.selected().unwrap_or(0);
         let field = &mut self.ops[self.op].fields[row];
-        let Kind::Choice { choices, multiple } = &field.kind else {
+        let Kind::Choice {
+            choices,
+            multiple,
+            custom,
+        } = &field.kind
+        else {
             return;
         };
-        let len = choices.len();
+        let len = choices.len() + usize::from(*custom);
+        if *custom && i == choices.len() && matches!(key.code, KeyCode::Enter | KeyCode::Char(' '))
+        {
+            self.editor = Some(Editor {
+                cursor: field.text.len(),
+                text: field.text.clone(),
+            });
+            self.popup = Popup::None;
+            return;
+        }
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => state.select(Some((i + len - 1) % len)),
             KeyCode::Down | KeyCode::Char('j') => state.select(Some((i + 1) % len)),
@@ -679,6 +753,7 @@ impl App {
                 let was = field.picked[i];
                 field.picked.iter_mut().for_each(|p| *p = false);
                 field.picked[i] = !was;
+                field.text.clear();
                 self.popup = Popup::None;
             }
             KeyCode::Enter | KeyCode::Esc => self.popup = Popup::None,
@@ -696,7 +771,10 @@ impl App {
             KeyCode::Esc => self.editor = None,
             KeyCode::Enter => {
                 let text = editor.text.clone();
-                self.ops[self.op].fields[row].text = text;
+                let field = &mut self.ops[self.op].fields[row];
+                field.text = text;
+                // A custom value replaces any picked choice.
+                field.picked.iter_mut().for_each(|p| *p = false);
                 self.editor = None;
             }
             KeyCode::Tab => {
@@ -980,10 +1058,15 @@ impl App {
             Popup::Picker { state } => {
                 let row = self.form.selected().unwrap_or(0);
                 let field = &self.ops[self.op].fields[row];
-                let Kind::Choice { choices, multiple } = &field.kind else {
+                let Kind::Choice {
+                    choices,
+                    multiple,
+                    custom,
+                } = &field.kind
+                else {
                     return;
                 };
-                let items: Vec<ListItem> = choices
+                let mut items: Vec<ListItem> = choices
                     .iter()
                     .zip(&field.picked)
                     .map(|(c, p)| {
@@ -996,7 +1079,22 @@ impl App {
                         ListItem::new(format!(" {} {}", mark, c))
                     })
                     .collect();
-                let popup = centered(area, 40, choices.len() as u16 + 2);
+                if *custom {
+                    let current = if field.picked.iter().any(|p| *p) {
+                        String::new()
+                    } else {
+                        field.text.clone()
+                    };
+                    items.push(ListItem::new(format!(
+                        " ✎  Custom… {}",
+                        if current.is_empty() {
+                            String::new()
+                        } else {
+                            format!("({})", current)
+                        }
+                    )));
+                }
+                let popup = centered(area, 40, items.len() as u16 + 2);
                 frame.render_widget(Clear, popup);
                 frame.render_stateful_widget(
                     List::new(items)
@@ -1128,6 +1226,7 @@ mod tests {
     fn lists_nested_operations_and_hides_menu() {
         let names: Vec<String> = ops().iter().map(|o| o.name()).collect();
         assert_eq!(names, vec!["hunt", "analyse gaps"]);
+        assert!(ORDER.contains(&"persistence"));
     }
 
     #[test]

@@ -207,3 +207,84 @@ fn analyse_gaps_low_threshold_flags_time_gaps() -> Result<(), Box<dyn std::error
 
     Ok(())
 }
+
+#[test]
+fn ioc_markdown_report() -> Result<(), Box<dyn std::error::Error>> {
+    let root = env!("CARGO_MANIFEST_DIR");
+    let sample_path = Path::new(root)
+        .join("tests/evtx")
+        .join("security_sample.evtx");
+    let mut cmd = cargo_bin_cmd!("chainsaw");
+
+    cmd.arg("--no-banner")
+        .arg("ioc")
+        .arg(sample_path)
+        .arg("--ioc")
+        .arg("services.exe")
+        .arg("--ioc")
+        .arg("evil.example.com")
+        .arg("--markdown");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("# Chainsaw IOC sweep"))
+        .stdout(predicate::str::contains(
+            "| 1 | High | 80 | IOC services.exe (process/file) | execution | 2 |",
+        ))
+        .stdout(predicate::str::contains("## Indicators not found"))
+        .stdout(predicate::str::contains("`evil.example.com` (domain)"));
+
+    Ok(())
+}
+
+#[test]
+fn ioc_respects_time_window() -> Result<(), Box<dyn std::error::Error>> {
+    let root = env!("CARGO_MANIFEST_DIR");
+    let sample_path = Path::new(root)
+        .join("tests/evtx")
+        .join("security_sample.evtx");
+    let mut cmd = cargo_bin_cmd!("chainsaw");
+
+    cmd.arg("--no-banner")
+        .arg("ioc")
+        .arg(sample_path)
+        .arg("--ioc")
+        .arg("services.exe")
+        .arg("--last")
+        .arg("1h")
+        .arg("--anchor")
+        .arg("2022-10-11T19:00:00")
+        .arg("--json");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("\"hits\":[]"));
+
+    Ok(())
+}
+
+#[test]
+fn persistence_without_findings() -> Result<(), Box<dyn std::error::Error>> {
+    let root = env!("CARGO_MANIFEST_DIR");
+    let sample_path = Path::new(root).join("tests/evtx");
+    let mut cmd = cargo_bin_cmd!("chainsaw");
+
+    cmd.arg("--no-banner").arg("persistence").arg(sample_path);
+    cmd.assert()
+        .success()
+        .stderr(predicate::str::contains("No persistence found"));
+
+    Ok(())
+}
+
+#[test]
+fn process_requires_a_selector() -> Result<(), Box<dyn std::error::Error>> {
+    let root = env!("CARGO_MANIFEST_DIR");
+    let sample_path = Path::new(root).join("tests/evtx");
+    let mut cmd = cargo_bin_cmd!("chainsaw");
+
+    cmd.arg("--no-banner").arg("process").arg(sample_path);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("--name, --pid or --guid"));
+
+    Ok(())
+}

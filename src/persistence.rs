@@ -69,12 +69,14 @@ pub fn registry_mechanism(path: &str) -> Option<(&'static str, &'static str)> {
         ("Print monitor", "T1547.010")
     } else if p.contains("\\command processor\\autorun") {
         ("Command Processor AutoRun", "T1546")
-    } else if p.contains("\\services\\") && (p.ends_with("\\imagepath") || p.ends_with("\\servicedll"))
+    } else if p.contains("\\services\\")
+        && (p.ends_with("\\imagepath") || p.ends_with("\\servicedll"))
     {
         ("Service", "T1543.003")
     } else if p.contains("\\environment\\userinitmprlogonscript") {
         ("Logon script", "T1037.001")
-    } else if p.contains("\\user shell folders\\startup") || p.contains("\\shell folders\\startup") {
+    } else if p.contains("\\user shell folders\\startup") || p.contains("\\shell folders\\startup")
+    {
         ("Startup folder redirect", "T1547.001")
     } else if p.contains("\\session manager\\bootexecute") {
         ("BootExecute", "T1547.001")
@@ -105,9 +107,21 @@ pub fn command_patterns() -> Vec<CommandPattern> {
         technique,
     };
     vec![
-        p(r"schtasks(\.exe)?\W.*/create", "Scheduled task (command)", "T1053.005"),
-        p(r"(register|new)-scheduledtask", "Scheduled task (command)", "T1053.005"),
-        p(r"\bsc(\.exe)?\s+(\\\\\S+\s+)?(create|config)\b", "Service (command)", "T1543.003"),
+        p(
+            r"schtasks(\.exe)?\W.*/create",
+            "Scheduled task (command)",
+            "T1053.005",
+        ),
+        p(
+            r"(register|new)-scheduledtask",
+            "Scheduled task (command)",
+            "T1053.005",
+        ),
+        p(
+            r"\bsc(\.exe)?\s+(\\\\\S+\s+)?(create|config)\b",
+            "Service (command)",
+            "T1543.003",
+        ),
         p(r"new-service\b", "Service (command)", "T1543.003"),
         p(
             r"reg(\.exe)?\s+add\s.*\\(run|runonce|winlogon|image file execution options|command processor|environment)",
@@ -124,7 +138,11 @@ pub fn command_patterns() -> Vec<CommandPattern> {
             "WMI subscription (command)",
             "T1546.003",
         ),
-        p(r"\bnet1?(\.exe)?\s+user\s+\S+.*\s/add", "Account created (command)", "T1136.001"),
+        p(
+            r"\bnet1?(\.exe)?\s+user\s+\S+.*\s/add",
+            "Account created (command)",
+            "T1136.001",
+        ),
         p(
             r"\bnet1?(\.exe)?\s+(local)?group\s+.*admin.*\s/add",
             "Admin group membership (command)",
@@ -186,11 +204,25 @@ pub fn from_event(e: &Event, patterns: &[CommandPattern]) -> Option<Item> {
     match (e.event_id, e.channel.as_str()) {
         (7045, _) if e.is_channel("System") => {
             let path = g("ImagePath");
-            Some(item(e, "Service installed", "T1543.003", g("ServiceName"), path, suspicious_level(path, Level::Medium)))
+            Some(item(
+                e,
+                "Service installed",
+                "T1543.003",
+                g("ServiceName"),
+                path,
+                suspicious_level(path, Level::Medium),
+            ))
         }
         (4697, _) if security => {
             let path = g("ServiceFileName");
-            Some(item(e, "Service installed", "T1543.003", g("ServiceName"), path, suspicious_level(path, Level::Medium)))
+            Some(item(
+                e,
+                "Service installed",
+                "T1543.003",
+                g("ServiceName"),
+                path,
+                suspicious_level(path, Level::Medium),
+            ))
         }
         (4698 | 4702, _) if security => {
             let command = task_command(g("TaskContent"));
@@ -199,7 +231,14 @@ pub fn from_event(e: &Event, patterns: &[CommandPattern]) -> Option<Item> {
             } else {
                 ("Scheduled task updated", Level::Low)
             };
-            Some(item(e, mechanism, "T1053.005", g("TaskName"), &command, suspicious_level(&command, base)))
+            Some(item(
+                e,
+                mechanism,
+                "T1053.005",
+                g("TaskName"),
+                &command,
+                suspicious_level(&command, base),
+            ))
         }
         (106, _) if e.channel.to_lowercase().contains("taskscheduler") => Some(item(
             e,
@@ -222,7 +261,9 @@ pub fn from_event(e: &Event, patterns: &[CommandPattern]) -> Option<Item> {
             let lower_group = group.to_lowercase();
             let level = if lower_group.contains("admin") {
                 Level::High
-            } else if lower_group.contains("remote desktop") || lower_group.contains("remote management") {
+            } else if lower_group.contains("remote desktop")
+                || lower_group.contains("remote management")
+            {
                 Level::Medium
             } else {
                 Level::Low
@@ -231,7 +272,14 @@ pub fn from_event(e: &Event, patterns: &[CommandPattern]) -> Option<Item> {
                 .into_iter()
                 .find(|m| !m.is_empty() && *m != "-")
                 .unwrap_or("");
-            Some(item(e, "Added to group", "T1098", group, &format!("{} by {}", member, g("SubjectUserName")), level))
+            Some(item(
+                e,
+                "Added to group",
+                "T1098",
+                group,
+                &format!("{} by {}", member, g("SubjectUserName")),
+                level,
+            ))
         }
         (5861, _) if e.channel.to_lowercase().contains("wmi-activity") => Some(item(
             e,
@@ -247,7 +295,14 @@ pub fn from_event(e: &Event, patterns: &[CommandPattern]) -> Option<Item> {
                 .filter(|v| !v.is_empty())
                 .collect::<Vec<_>>()
                 .join(" ");
-            Some(item(e, "WMI subscription", "T1546.003", g("Name"), &data, Level::High))
+            Some(item(
+                e,
+                "WMI subscription",
+                "T1546.003",
+                g("Name"),
+                &data,
+                Level::High,
+            ))
         }
         (12..=14, _) if e.is_sysmon() => {
             let target = g("TargetObject");
@@ -258,22 +313,50 @@ pub fn from_event(e: &Event, patterns: &[CommandPattern]) -> Option<Item> {
             let details = g("Details");
             Some(Item {
                 data: format!("{} (by {})", details, g("Image")),
-                ..item(e, mechanism, technique, target, "", suspicious_level(details, Level::Medium))
+                ..item(
+                    e,
+                    mechanism,
+                    technique,
+                    target,
+                    "",
+                    suspicious_level(details, Level::Medium),
+                )
             })
         }
         (4657, _) if security => {
             let target = format!("{}\\{}", g("ObjectName"), g("ObjectValueName"));
             let (mechanism, technique) = registry_mechanism(&target)?;
             let value = g("NewValue");
-            Some(item(e, mechanism, technique, &target, value, suspicious_level(value, Level::Medium)))
+            Some(item(
+                e,
+                mechanism,
+                technique,
+                &target,
+                value,
+                suspicious_level(value, Level::Medium),
+            ))
         }
         (11, _) if e.is_sysmon() => {
             let file = g("TargetFilename");
             let lower_file = file.to_lowercase();
             if lower_file.contains("\\start menu\\programs\\startup\\") {
-                Some(item(e, "Startup folder file", "T1547.001", file, &format!("created by {}", g("Image")), Level::High))
+                Some(item(
+                    e,
+                    "Startup folder file",
+                    "T1547.001",
+                    file,
+                    &format!("created by {}", g("Image")),
+                    Level::High,
+                ))
             } else if lower_file.contains("\\windows\\system32\\tasks\\") {
-                Some(item(e, "Scheduled task file", "T1053.005", file, &format!("created by {}", g("Image")), Level::Medium))
+                Some(item(
+                    e,
+                    "Scheduled task file",
+                    "T1053.005",
+                    file,
+                    &format!("created by {}", g("Image")),
+                    Level::Medium,
+                ))
             } else {
                 None
             }
@@ -281,7 +364,11 @@ pub fn from_event(e: &Event, patterns: &[CommandPattern]) -> Option<Item> {
         (1, _) | (4688, _) if e.is_sysmon() || security => {
             let command = g("CommandLine");
             let pattern = patterns.iter().find(|p| p.regex.is_match(command))?;
-            let image = if e.is_sysmon() { g("Image") } else { g("NewProcessName") };
+            let image = if e.is_sysmon() {
+                g("Image")
+            } else {
+                g("NewProcessName")
+            };
             Some(item(
                 e,
                 pattern.mechanism,
@@ -345,7 +432,9 @@ fn collect(paths: &[PathBuf]) -> (Vec<Hive>, Vec<PathBuf>, Vec<PathBuf>) {
             continue;
         }
         let lower = path.to_string_lossy().to_lowercase().replace('/', "\\");
-        if lower.contains("\\start menu\\programs\\startup\\") && !name.eq_ignore_ascii_case("desktop.ini") {
+        if lower.contains("\\start menu\\programs\\startup\\")
+            && !name.eq_ignore_ascii_case("desktop.ini")
+        {
             startup.push(path);
         } else if lower.contains("\\windows\\system32\\tasks\\") && path.extension().is_none() {
             tasks.push(path);
@@ -370,7 +459,15 @@ impl HiveReader<'_> {
         format!("registry: {}", self.hive.path.display())
     }
 
-    fn push(&mut self, key: &CellKeyNode, value: &str, data: &str, mechanism: &str, technique: &str, level: Level) {
+    fn push(
+        &mut self,
+        key: &CellKeyNode,
+        value: &str,
+        data: &str,
+        mechanism: &str,
+        technique: &str,
+        level: Level,
+    ) {
         self.items.push(Item {
             timestamp: Some(key.last_key_written_date_and_time()),
             host: self.host.clone(),
@@ -392,13 +489,28 @@ impl HiveReader<'_> {
                 .map(|v| (v.get_pretty_name(), value_text(&v.get_content().0)))
                 .collect();
             for (name, data) in values {
-                self.push(&key, &name, &data, mechanism, technique, suspicious_level(&data, base.clone()));
+                self.push(
+                    &key,
+                    &name,
+                    &data,
+                    mechanism,
+                    technique,
+                    suspicious_level(&data, base.clone()),
+                );
             }
         }
     }
 
     /// Reports the value if it differs from what Windows ships with.
-    fn unexpected(&mut self, path: &str, value: &str, expected: &[&str], mechanism: &str, technique: &str, level: Level) {
+    fn unexpected(
+        &mut self,
+        path: &str,
+        value: &str,
+        expected: &[&str],
+        mechanism: &str,
+        technique: &str,
+        level: Level,
+    ) {
         if let Some(key) = self.key(path)
             && let Some(v) = key.get_value(value)
         {
@@ -409,14 +521,27 @@ impl HiveReader<'_> {
                 .map(|p| p.trim())
                 .filter(|p| !p.is_empty())
                 .collect();
-            if parts.iter().any(|p| !expected.iter().any(|e| p.ends_with(e))) {
+            if parts
+                .iter()
+                .any(|p| !expected.iter().any(|e| p.ends_with(e)))
+            {
                 self.push(&key, value, &data, mechanism, technique, level);
             }
         }
     }
 
     /// Reports a value of each sub key when it looks suspicious.
-    fn sub_values(&mut self, path: &str, sub_path: &str, value: &str, mechanism: &str, technique: &str, level: Level, only_suspicious: bool) {
+    #[allow(clippy::too_many_arguments)]
+    fn sub_values(
+        &mut self,
+        path: &str,
+        sub_path: &str,
+        value: &str,
+        mechanism: &str,
+        technique: &str,
+        level: Level,
+        only_suspicious: bool,
+    ) {
         let Some(mut key) = self.key(path) else {
             return;
         };
@@ -434,7 +559,11 @@ impl HiveReader<'_> {
                 if data.is_empty() || (only_suspicious && !is_suspicious_path(&data)) {
                     continue;
                 }
-                let level = if only_suspicious { level.clone() } else { suspicious_level(&data, level.clone()) };
+                let level = if only_suspicious {
+                    level.clone()
+                } else {
+                    suspicious_level(&data, level.clone())
+                };
                 let name = format!("{} ({})", sub.key_name, value);
                 self.push(&target, &name, &data, mechanism, technique, level);
             }
@@ -451,7 +580,10 @@ fn computer_name(parser: &mut HveParser) -> Option<String> {
     let key = parser
         .inner
         .get_key(
-            &format!("ControlSet{:03}\\Control\\ComputerName\\ComputerName", current),
+            &format!(
+                "ControlSet{:03}\\Control\\ComputerName\\ComputerName",
+                current
+            ),
             false,
         )
         .ok()??;
@@ -482,15 +614,82 @@ fn sweep_hive(hive: &Hive, host: &str) -> crate::Result<Vec<Item>> {
                 r.values(key, "Run key", "T1547.001", Level::Low);
             }
             let winlogon = r"Microsoft\Windows NT\CurrentVersion\Winlogon";
-            r.unexpected(winlogon, "Userinit", &["userinit.exe"], "Winlogon", "T1547.004", Level::Critical);
-            r.unexpected(winlogon, "Shell", &["explorer.exe"], "Winlogon", "T1547.004", Level::Critical);
-            r.sub_values(r"Microsoft\Windows NT\CurrentVersion\Winlogon\Notify", "", "DLLName", "Winlogon", "T1547.004", Level::High, false);
-            r.sub_values(r"Microsoft\Windows NT\CurrentVersion\Image File Execution Options", "", "Debugger", "Image File Execution Options", "T1546.012", Level::High, false);
-            r.sub_values(r"Microsoft\Windows NT\CurrentVersion\SilentProcessExit", "", "MonitorProcess", "Image File Execution Options", "T1546.012", Level::High, false);
-            r.unexpected(r"Microsoft\Windows NT\CurrentVersion\Windows", "AppInit_DLLs", &[], "AppInit DLLs", "T1546.010", Level::High);
-            r.unexpected(r"Wow6432Node\Microsoft\Windows NT\CurrentVersion\Windows", "AppInit_DLLs", &[], "AppInit DLLs", "T1546.010", Level::High);
-            r.sub_values(r"Microsoft\Active Setup\Installed Components", "", "StubPath", "Active Setup", "T1547.014", Level::High, true);
-            r.unexpected(r"Microsoft\Command Processor", "AutoRun", &[], "Command Processor AutoRun", "T1546", Level::High);
+            r.unexpected(
+                winlogon,
+                "Userinit",
+                &["userinit.exe"],
+                "Winlogon",
+                "T1547.004",
+                Level::Critical,
+            );
+            r.unexpected(
+                winlogon,
+                "Shell",
+                &["explorer.exe"],
+                "Winlogon",
+                "T1547.004",
+                Level::Critical,
+            );
+            r.sub_values(
+                r"Microsoft\Windows NT\CurrentVersion\Winlogon\Notify",
+                "",
+                "DLLName",
+                "Winlogon",
+                "T1547.004",
+                Level::High,
+                false,
+            );
+            r.sub_values(
+                r"Microsoft\Windows NT\CurrentVersion\Image File Execution Options",
+                "",
+                "Debugger",
+                "Image File Execution Options",
+                "T1546.012",
+                Level::High,
+                false,
+            );
+            r.sub_values(
+                r"Microsoft\Windows NT\CurrentVersion\SilentProcessExit",
+                "",
+                "MonitorProcess",
+                "Image File Execution Options",
+                "T1546.012",
+                Level::High,
+                false,
+            );
+            r.unexpected(
+                r"Microsoft\Windows NT\CurrentVersion\Windows",
+                "AppInit_DLLs",
+                &[],
+                "AppInit DLLs",
+                "T1546.010",
+                Level::High,
+            );
+            r.unexpected(
+                r"Wow6432Node\Microsoft\Windows NT\CurrentVersion\Windows",
+                "AppInit_DLLs",
+                &[],
+                "AppInit DLLs",
+                "T1546.010",
+                Level::High,
+            );
+            r.sub_values(
+                r"Microsoft\Active Setup\Installed Components",
+                "",
+                "StubPath",
+                "Active Setup",
+                "T1547.014",
+                Level::High,
+                true,
+            );
+            r.unexpected(
+                r"Microsoft\Command Processor",
+                "AutoRun",
+                &[],
+                "Command Processor AutoRun",
+                "T1546",
+                Level::High,
+            );
             r.values(r"Microsoft\Netsh", "Netsh helper", "T1546.007", Level::Info);
         }
         HiveKind::System => {
@@ -503,19 +702,52 @@ fn sweep_hive(hive: &Hive, host: &str) -> crate::Result<Vec<Item>> {
                 })
                 .unwrap_or(1);
             let cs = format!("ControlSet{:03}", current);
-            r.sub_values(&format!(r"{}\Services", cs), "", "ImagePath", "Service", "T1543.003", Level::High, true);
-            r.sub_values(&format!(r"{}\Services", cs), "Parameters", "ServiceDll", "Service", "T1543.003", Level::High, true);
+            r.sub_values(
+                &format!(r"{}\Services", cs),
+                "",
+                "ImagePath",
+                "Service",
+                "T1543.003",
+                Level::High,
+                true,
+            );
+            r.sub_values(
+                &format!(r"{}\Services", cs),
+                "Parameters",
+                "ServiceDll",
+                "Service",
+                "T1543.003",
+                Level::High,
+                true,
+            );
             let lsa = format!(r"{}\Control\Lsa", cs);
-            r.unexpected(&lsa, "Authentication Packages", &["msv1_0", "\"\""], "LSA package", "T1547.002", Level::High);
+            r.unexpected(
+                &lsa,
+                "Authentication Packages",
+                &["msv1_0", "\"\""],
+                "LSA package",
+                "T1547.002",
+                Level::High,
+            );
             r.unexpected(
                 &lsa,
                 "Security Packages",
-                &["kerberos", "msv1_0", "schannel", "wdigest", "tspkg", "pku2u", "cloudap", "\"\"", "livessp", "negoexts", "msoidssp"],
+                &[
+                    "kerberos", "msv1_0", "schannel", "wdigest", "tspkg", "pku2u", "cloudap",
+                    "\"\"", "livessp", "negoexts", "msoidssp",
+                ],
                 "LSA package",
                 "T1547.005",
                 Level::High,
             );
-            r.unexpected(&lsa, "Notification Packages", &["scecli", "rassfm"], "LSA package", "T1556.002", Level::High);
+            r.unexpected(
+                &lsa,
+                "Notification Packages",
+                &["scecli", "rassfm"],
+                "LSA package",
+                "T1556.002",
+                Level::High,
+            );
             r.unexpected(
                 &format!(r"{}\Control\Session Manager", cs),
                 "BootExecute",
@@ -524,21 +756,81 @@ fn sweep_hive(hive: &Hive, host: &str) -> crate::Result<Vec<Item>> {
                 "T1547.001",
                 Level::High,
             );
-            r.sub_values(&format!(r"{}\Control\Print\Monitors", cs), "", "Driver", "Print monitor", "T1547.010", Level::Medium, false);
+            r.sub_values(
+                &format!(r"{}\Control\Print\Monitors", cs),
+                "",
+                "Driver",
+                "Print monitor",
+                "T1547.010",
+                Level::Medium,
+                false,
+            );
             // Drop the stock print monitors.
-            let stock = ["localspl.dll", "tcpmon.dll", "usbmon.dll", "wsdmon.dll", "apmon.dll", "appmon.dll", "fxsmon.dll", "mfpmon.dll", "pjlmon.dll"];
-            r.items.retain(|i| i.mechanism != "Print monitor" || !stock.contains(&i.data.to_lowercase().as_str()));
+            let stock = [
+                "localspl.dll",
+                "tcpmon.dll",
+                "usbmon.dll",
+                "wsdmon.dll",
+                "apmon.dll",
+                "appmon.dll",
+                "fxsmon.dll",
+                "mfpmon.dll",
+                "pjlmon.dll",
+            ];
+            r.items.retain(|i| {
+                i.mechanism != "Print monitor" || !stock.contains(&i.data.to_lowercase().as_str())
+            });
         }
         HiveKind::NtUser => {
             for key in run_keys.iter().filter(|k| !k.starts_with("Wow6432Node")) {
-                r.values(&format!(r"Software\{}", key), "Run key (user)", "T1547.001", Level::Low);
+                r.values(
+                    &format!(r"Software\{}", key),
+                    "Run key (user)",
+                    "T1547.001",
+                    Level::Low,
+                );
             }
             let windows = r"Software\Microsoft\Windows NT\CurrentVersion\Windows";
-            r.unexpected(windows, "Load", &[], "Windows Load/Run", "T1547.001", Level::High);
-            r.unexpected(windows, "Run", &[], "Windows Load/Run", "T1547.001", Level::High);
-            r.unexpected(r"Software\Microsoft\Windows NT\CurrentVersion\Winlogon", "Shell", &["explorer.exe"], "Winlogon", "T1547.004", Level::Critical);
-            r.unexpected("Environment", "UserInitMprLogonScript", &[], "Logon script", "T1037.001", Level::High);
-            r.unexpected(r"Software\Microsoft\Command Processor", "AutoRun", &[], "Command Processor AutoRun", "T1546", Level::High);
+            r.unexpected(
+                windows,
+                "Load",
+                &[],
+                "Windows Load/Run",
+                "T1547.001",
+                Level::High,
+            );
+            r.unexpected(
+                windows,
+                "Run",
+                &[],
+                "Windows Load/Run",
+                "T1547.001",
+                Level::High,
+            );
+            r.unexpected(
+                r"Software\Microsoft\Windows NT\CurrentVersion\Winlogon",
+                "Shell",
+                &["explorer.exe"],
+                "Winlogon",
+                "T1547.004",
+                Level::Critical,
+            );
+            r.unexpected(
+                "Environment",
+                "UserInitMprLogonScript",
+                &[],
+                "Logon script",
+                "T1037.001",
+                Level::High,
+            );
+            r.unexpected(
+                r"Software\Microsoft\Command Processor",
+                "AutoRun",
+                &[],
+                "Command Processor AutoRun",
+                "T1546",
+                Level::High,
+            );
             r.unexpected(
                 r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders",
                 "Startup",
@@ -547,10 +839,26 @@ fn sweep_hive(hive: &Hive, host: &str) -> crate::Result<Vec<Item>> {
                 "T1547.001",
                 Level::High,
             );
-            r.sub_values(r"Software\Classes\CLSID", "InprocServer32", "(default)", "COM hijack", "T1546.015", Level::High, true);
+            r.sub_values(
+                r"Software\Classes\CLSID",
+                "InprocServer32",
+                "(default)",
+                "COM hijack",
+                "T1546.015",
+                Level::High,
+                true,
+            );
         }
         HiveKind::UsrClass => {
-            r.sub_values("CLSID", "InprocServer32", "(default)", "COM hijack", "T1546.015", Level::High, true);
+            r.sub_values(
+                "CLSID",
+                "InprocServer32",
+                "(default)",
+                "COM hijack",
+                "T1546.015",
+                Level::High,
+                true,
+            );
         }
     }
     Ok(r.items)
@@ -570,7 +878,11 @@ fn read_text(path: &Path) -> Option<String> {
 }
 
 fn modified(path: &Path) -> Option<DateTime<Utc>> {
-    fs::metadata(path).ok()?.modified().ok().map(DateTime::<Utc>::from)
+    fs::metadata(path)
+        .ok()?
+        .modified()
+        .ok()
+        .map(DateTime::<Utc>::from)
 }
 
 fn sweep_files(startup: &[PathBuf], tasks: &[PathBuf], host: &str) -> Vec<Item> {
@@ -581,16 +893,27 @@ fn sweep_files(startup: &[PathBuf], tasks: &[PathBuf], host: &str) -> Vec<Item> 
             .extension()
             .map(|e| e.to_string_lossy().to_lowercase())
             .unwrap_or_default();
-        let executable = ["exe", "dll", "bat", "cmd", "ps1", "vbs", "vbe", "js", "jse", "hta", "scr", "wsf", "jar"].contains(&ext.as_str());
+        let executable = [
+            "exe", "dll", "bat", "cmd", "ps1", "vbs", "vbe", "js", "jse", "hta", "scr", "wsf",
+            "jar",
+        ]
+        .contains(&ext.as_str());
         items.push(Item {
             timestamp: modified(path),
             host: host.to_string(),
             mechanism: "Startup folder file".to_string(),
             technique: "T1547.001".to_string(),
             location: p.clone(),
-            name: path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
+            name: path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default(),
             data: p,
-            level: if executable { Level::High } else { Level::Medium },
+            level: if executable {
+                Level::High
+            } else {
+                Level::Medium
+            },
             source: "file".to_string(),
         });
     }
@@ -603,7 +926,10 @@ fn sweep_files(startup: &[PathBuf], tasks: &[PathBuf], host: &str) -> Vec<Item> 
         }
         let command = task_command(&xml);
         let p = path.to_string_lossy().to_string();
-        let stock = p.to_lowercase().replace('/', "\\").contains("\\tasks\\microsoft\\");
+        let stock = p
+            .to_lowercase()
+            .replace('/', "\\")
+            .contains("\\tasks\\microsoft\\");
         let suspicious = is_suspicious_path(&command);
         if stock && !suspicious {
             continue;
@@ -614,7 +940,10 @@ fn sweep_files(startup: &[PathBuf], tasks: &[PathBuf], host: &str) -> Vec<Item> 
             mechanism: "Scheduled task".to_string(),
             technique: "T1053.005".to_string(),
             location: p,
-            name: path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
+            name: path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default(),
             data: command,
             level: if suspicious { Level::High } else { Level::Low },
             source: "file".to_string(),
@@ -628,7 +957,12 @@ pub fn to_findings(items: &[Item]) -> Vec<Finding> {
     let mut grouped: BTreeMap<(String, String, String, String), Finding> = BTreeMap::new();
     for i in items {
         let finding = grouped
-            .entry((i.host.clone(), i.mechanism.clone(), i.name.clone(), i.data.clone()))
+            .entry((
+                i.host.clone(),
+                i.mechanism.clone(),
+                i.name.clone(),
+                i.data.clone(),
+            ))
             .or_insert_with(|| {
                 let title = if i.name.is_empty() {
                     i.mechanism.clone()
@@ -675,13 +1009,17 @@ pub fn run(opts: Options) -> crate::Result<()> {
         window_text(&opts.window).to_lowercase()
     );
     if files.is_empty() && hives.is_empty() && startup.is_empty() && tasks.is_empty() {
-        anyhow::bail!("No event logs, registry hives or persistence files were found in the provided paths");
+        anyhow::bail!(
+            "No event logs, registry hives or persistence files were found in the provided paths"
+        );
     }
 
     let patterns = command_patterns();
     let mut items = vec![];
     if !files.is_empty() {
-        let events = events::load(&files, &opts.window, opts.skip_errors, |e| from_event(e, &patterns).is_some())?;
+        let events = events::load(&files, &opts.window, opts.skip_errors, |e| {
+            from_event(e, &patterns).is_some()
+        })?;
         items.extend(events.iter().filter_map(|e| from_event(e, &patterns)));
     }
 
@@ -754,7 +1092,17 @@ pub fn run(opts: Options) -> crate::Result<()> {
             } else {
                 let mut table = Table::new();
                 table.set_format(crate::cli::table_format());
-                table.set_titles(row!["#", "severity", "mechanism", "name", "data", "host", "seen (UTC)", "count", "source"]);
+                table.set_titles(row![
+                    "#",
+                    "severity",
+                    "mechanism",
+                    "name",
+                    "data",
+                    "host",
+                    "seen (UTC)",
+                    "count",
+                    "source"
+                ]);
                 for f in &findings {
                     let e = &f.evidence[0];
                     table.add_row(row![
@@ -773,7 +1121,11 @@ pub fn run(opts: Options) -> crate::Result<()> {
             }
         }
     }
-    cs_eprintln!("[+] Found {} persistence items ({} entries)", found, items.len());
+    cs_eprintln!(
+        "[+] Found {} persistence items ({} entries)",
+        found,
+        items.len()
+    );
     Ok(())
 }
 
@@ -789,15 +1141,28 @@ mod tests {
             provider: String::new(),
             event_id: id,
             record_id: 1,
-            fields: fields.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            fields: fields
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
             file: PathBuf::new(),
         }
     }
 
     #[test]
     fn maps_registry_locations() {
-        assert_eq!(registry_mechanism(r"HKU\S-1\Software\Microsoft\Windows\CurrentVersion\Run\evil").unwrap().0, "Run key");
-        assert_eq!(registry_mechanism(r"HKLM\System\CurrentControlSet\Services\x\ImagePath").unwrap().0, "Service");
+        assert_eq!(
+            registry_mechanism(r"HKU\S-1\Software\Microsoft\Windows\CurrentVersion\Run\evil")
+                .unwrap()
+                .0,
+            "Run key"
+        );
+        assert_eq!(
+            registry_mechanism(r"HKLM\System\CurrentControlSet\Services\x\ImagePath")
+                .unwrap()
+                .0,
+            "Service"
+        );
         assert_eq!(
             registry_mechanism(r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\sethc.exe\Debugger").unwrap().0,
             "Image File Execution Options"
@@ -808,43 +1173,98 @@ mod tests {
     #[test]
     fn detects_persistence_events() {
         let patterns = command_patterns();
-        let svc = event(7045, "System", &[("ServiceName", "evil"), ("ImagePath", r"C:\Users\Public\evil.exe")]);
+        let svc = event(
+            7045,
+            "System",
+            &[
+                ("ServiceName", "evil"),
+                ("ImagePath", r"C:\Users\Public\evil.exe"),
+            ],
+        );
         let i = from_event(&svc, &patterns).unwrap();
-        assert_eq!((i.mechanism.as_str(), i.level.clone()), ("Service installed", Level::High));
+        assert_eq!(
+            (i.mechanism.as_str(), i.level.clone()),
+            ("Service installed", Level::High)
+        );
 
-        let task = event(4698, "Security", &[
-            ("TaskName", r"\Updater"),
-            ("TaskContent", "<Task><Actions><Exec><Command>powershell.exe</Command><Arguments>-enc AAA</Arguments></Exec></Actions></Task>"),
-        ]);
+        let task = event(
+            4698,
+            "Security",
+            &[
+                ("TaskName", r"\Updater"),
+                (
+                    "TaskContent",
+                    "<Task><Actions><Exec><Command>powershell.exe</Command><Arguments>-enc AAA</Arguments></Exec></Actions></Task>",
+                ),
+            ],
+        );
         let i = from_event(&task, &patterns).unwrap();
         assert_eq!(i.data, "powershell.exe -enc AAA");
         assert_eq!(i.level, Level::High);
 
-        let cmd = event(1, "Microsoft-Windows-Sysmon/Operational", &[
-            ("Image", r"C:\Windows\System32\schtasks.exe"),
-            ("CommandLine", r"schtasks /create /tn x /tr C:\ProgramData\x.exe /sc onlogon"),
-        ]);
-        assert_eq!(from_event(&cmd, &patterns).unwrap().mechanism, "Scheduled task (command)");
+        let cmd = event(
+            1,
+            "Microsoft-Windows-Sysmon/Operational",
+            &[
+                ("Image", r"C:\Windows\System32\schtasks.exe"),
+                (
+                    "CommandLine",
+                    r"schtasks /create /tn x /tr C:\ProgramData\x.exe /sc onlogon",
+                ),
+            ],
+        );
+        assert_eq!(
+            from_event(&cmd, &patterns).unwrap().mechanism,
+            "Scheduled task (command)"
+        );
 
-        let reg = event(13, "Microsoft-Windows-Sysmon/Operational", &[
-            ("EventType", "SetValue"),
-            ("TargetObject", r"HKU\S-1\Software\Microsoft\Windows\CurrentVersion\Run\updater"),
-            ("Details", r"C:\Users\bob\AppData\Roaming\u.exe"),
-            ("Image", r"C:\Windows\regedit.exe"),
-        ]);
+        let reg = event(
+            13,
+            "Microsoft-Windows-Sysmon/Operational",
+            &[
+                ("EventType", "SetValue"),
+                (
+                    "TargetObject",
+                    r"HKU\S-1\Software\Microsoft\Windows\CurrentVersion\Run\updater",
+                ),
+                ("Details", r"C:\Users\bob\AppData\Roaming\u.exe"),
+                ("Image", r"C:\Windows\regedit.exe"),
+            ],
+        );
         let i = from_event(&reg, &patterns).unwrap();
-        assert_eq!((i.mechanism.as_str(), i.level.clone()), ("Run key", Level::High));
+        assert_eq!(
+            (i.mechanism.as_str(), i.level.clone()),
+            ("Run key", Level::High)
+        );
 
-        let benign = event(1, "Microsoft-Windows-Sysmon/Operational", &[("CommandLine", "notepad.exe")]);
+        let benign = event(
+            1,
+            "Microsoft-Windows-Sysmon/Operational",
+            &[("CommandLine", "notepad.exe")],
+        );
         assert!(from_event(&benign, &patterns).is_none());
     }
 
     #[test]
     fn groups_items_into_ranked_findings() {
         let patterns = command_patterns();
-        let svc = event(7045, "System", &[("ServiceName", "evil"), ("ImagePath", r"C:\Users\Public\evil.exe")]);
-        let user = event(4720, "Security", &[("TargetUserName", "backdoor"), ("SubjectUserName", "admin")]);
-        let items: Vec<Item> = [&svc, &svc, &user].iter().filter_map(|e| from_event(e, &patterns)).collect();
+        let svc = event(
+            7045,
+            "System",
+            &[
+                ("ServiceName", "evil"),
+                ("ImagePath", r"C:\Users\Public\evil.exe"),
+            ],
+        );
+        let user = event(
+            4720,
+            "Security",
+            &[("TargetUserName", "backdoor"), ("SubjectUserName", "admin")],
+        );
+        let items: Vec<Item> = [&svc, &svc, &user]
+            .iter()
+            .filter_map(|e| from_event(e, &patterns))
+            .collect();
         let findings = to_findings(&items);
         assert_eq!(findings.len(), 2);
         assert_eq!(findings[0].title, "Service installed: evil");
@@ -868,7 +1288,14 @@ mod tests {
         }) else {
             return;
         };
-        let items = sweep_hive(&Hive { path: hive, kind: HiveKind::NtUser }, "PC").unwrap();
+        let items = sweep_hive(
+            &Hive {
+                path: hive,
+                kind: HiveKind::NtUser,
+            },
+            "PC",
+        )
+        .unwrap();
         assert!(items.iter().all(|i| i.source.starts_with("registry")));
     }
 }

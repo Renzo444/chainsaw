@@ -76,7 +76,8 @@ impl Event {
     }
 
     pub fn is_sysmon(&self) -> bool {
-        self.channel.eq_ignore_ascii_case("Microsoft-Windows-Sysmon/Operational")
+        self.channel
+            .eq_ignore_ascii_case("Microsoft-Windows-Sysmon/Operational")
     }
 
     pub fn is_channel(&self, channel: &str) -> bool {
@@ -89,7 +90,9 @@ impl Event {
             "Sysmon"
         } else {
             let channel = self.channel.split('/').next().unwrap_or(&self.channel);
-            channel.strip_prefix("Microsoft-Windows-").unwrap_or(channel)
+            channel
+                .strip_prefix("Microsoft-Windows-")
+                .unwrap_or(channel)
         };
         format!("{} {}", channel, self.event_id)
     }
@@ -260,8 +263,12 @@ mod tests {
         assert!(is_suspicious_path(r"C:\Users\bob\AppData\Roaming\x.exe"));
         assert!(is_suspicious_path(r"%COMSPEC% /c echo"));
         assert!(is_suspicious_path(r"powershell.exe -enc AAAA"));
-        assert!(!is_suspicious_path(r"C:\Windows\System32\svchost.exe -k netsvcs"));
-        assert!(!is_suspicious_path(r#""C:\Program Files\Vendor\agent.exe""#));
+        assert!(!is_suspicious_path(
+            r"C:\Windows\System32\svchost.exe -k netsvcs"
+        ));
+        assert!(!is_suspicious_path(
+            r#""C:\Program Files\Vendor\agent.exe""#
+        ));
         assert!(!is_suspicious_path(
             r#""C:\ProgramData\Microsoft\Windows Defender\Platform\4.18\MsMpEng.exe""#
         ));

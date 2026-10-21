@@ -75,7 +75,8 @@ impl Forest {
         let id = self.processes.len();
         p.id = id;
         if let Some(guid) = &p.guid {
-            self.by_guid.insert((p.host.clone(), guid.to_lowercase()), id);
+            self.by_guid
+                .insert((p.host.clone(), guid.to_lowercase()), id);
         }
         self.processes.push(p);
         id
@@ -174,7 +175,7 @@ impl Forest {
                     if image == "unknown" && forest.processes[id].ppid.is_none() {
                         continue;
                     }
-                    let parent = forest.add(Process {
+                    forest.add(Process {
                         id: 0,
                         host: e.host.clone(),
                         guid: Some(parent_guid).filter(|g| !g.is_empty()),
@@ -188,8 +189,7 @@ impl Forest {
                         parent: None,
                         children: vec![],
                         inferred: true,
-                    });
-                    parent
+                    })
                 }
             };
             forest.link(id, parent);
@@ -253,9 +253,10 @@ impl Selector {
             image.contains(&n) || command_line.contains(&n)
         }) || p.pid.is_some_and(|pid| self.pids.contains(&pid))
             || p.guid.as_ref().is_some_and(|g| {
-                self.guids
-                    .iter()
-                    .any(|s| s.trim_matches(['{', '}']).eq_ignore_ascii_case(g.trim_matches(['{', '}'])))
+                self.guids.iter().any(|s| {
+                    s.trim_matches(['{', '}'])
+                        .eq_ignore_ascii_case(g.trim_matches(['{', '}']))
+                })
             })
     }
 }
@@ -526,7 +527,10 @@ pub fn run(opts: Options) -> crate::Result<()> {
         }
         Output::Std => {
             if d.lines.is_empty() {
-                cs_eprintln!("[+] No processes matched {}", describe_selector(&opts.selector));
+                cs_eprintln!(
+                    "[+] No processes matched {}",
+                    describe_selector(&opts.selector)
+                );
             } else {
                 cs_eprintln!(
                     "[+] {} matching process trees ({} processes):\n",
@@ -538,7 +542,13 @@ pub fn run(opts: Options) -> crate::Result<()> {
                     cs_eprintln!("\n[+] Timeline of the processes and their children:");
                     let mut table = Table::new();
                     table.set_format(crate::cli::table_format());
-                    table.set_titles(row!["timestamp (UTC)", "host", "process", "event", "detail"]);
+                    table.set_titles(row![
+                        "timestamp (UTC)",
+                        "host",
+                        "process",
+                        "event",
+                        "detail"
+                    ]);
                     for t in &d.timeline {
                         table.add_row(row![
                             t.timestamp.format("%Y-%m-%d %H:%M:%S"),
@@ -564,7 +574,11 @@ fn describe_selector(s: &Selector) -> String {
     if !s.pids.is_empty() {
         parts.push(format!(
             "pid: {}",
-            s.pids.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", ")
+            s.pids
+                .iter()
+                .map(|p| p.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
     if !s.guids.is_empty() {
@@ -605,28 +619,86 @@ mod tests {
 
     fn sample() -> Vec<Event> {
         vec![
-            event(1, SYSMON, 0, &[
-                ("ProcessGuid", "{A}"), ("ProcessId", "100"), ("Image", r"C:\Windows\explorer.exe"),
-                ("ParentProcessGuid", "{ROOT}"), ("ParentProcessId", "4"), ("ParentImage", r"C:\Windows\userinit.exe"),
-            ]),
-            event(1, SYSMON, 10, &[
-                ("ProcessGuid", "{B}"), ("ProcessId", "200"), ("Image", r"C:\Windows\System32\cmd.exe"),
-                ("CommandLine", "cmd.exe /c evil.bat"), ("ParentProcessGuid", "{A}"), ("ParentProcessId", "100"),
-            ]),
-            event(1, SYSMON, 20, &[
-                ("ProcessGuid", "{C}"), ("ProcessId", "300"), ("Image", r"C:\Users\Public\evil.exe"),
-                ("CommandLine", r"C:\Users\Public\evil.exe"), ("ParentProcessGuid", "{B}"), ("ParentProcessId", "200"),
-            ]),
-            event(22, SYSMON, 25, &[("ProcessGuid", "{C}"), ("QueryName", "c2.example.com"), ("QueryResults", "1.2.3.4")]),
-            event(3, SYSMON, 26, &[("ProcessGuid", "{C}"), ("DestinationIp", "1.2.3.4"), ("DestinationPort", "443")]),
-            event(4688, "Security", 30, &[
-                ("NewProcessId", "0x190"), ("NewProcessName", r"C:\Windows\System32\whoami.exe"),
-                ("ProcessId", "0x12c"), ("CommandLine", "whoami /all"),
-            ]),
-            event(4688, "Security", 40, &[
-                ("NewProcessId", "0x12c"), ("NewProcessName", r"C:\Users\Public\evil.exe"),
-                ("ProcessId", "0xc8"),
-            ]),
+            event(
+                1,
+                SYSMON,
+                0,
+                &[
+                    ("ProcessGuid", "{A}"),
+                    ("ProcessId", "100"),
+                    ("Image", r"C:\Windows\explorer.exe"),
+                    ("ParentProcessGuid", "{ROOT}"),
+                    ("ParentProcessId", "4"),
+                    ("ParentImage", r"C:\Windows\userinit.exe"),
+                ],
+            ),
+            event(
+                1,
+                SYSMON,
+                10,
+                &[
+                    ("ProcessGuid", "{B}"),
+                    ("ProcessId", "200"),
+                    ("Image", r"C:\Windows\System32\cmd.exe"),
+                    ("CommandLine", "cmd.exe /c evil.bat"),
+                    ("ParentProcessGuid", "{A}"),
+                    ("ParentProcessId", "100"),
+                ],
+            ),
+            event(
+                1,
+                SYSMON,
+                20,
+                &[
+                    ("ProcessGuid", "{C}"),
+                    ("ProcessId", "300"),
+                    ("Image", r"C:\Users\Public\evil.exe"),
+                    ("CommandLine", r"C:\Users\Public\evil.exe"),
+                    ("ParentProcessGuid", "{B}"),
+                    ("ParentProcessId", "200"),
+                ],
+            ),
+            event(
+                22,
+                SYSMON,
+                25,
+                &[
+                    ("ProcessGuid", "{C}"),
+                    ("QueryName", "c2.example.com"),
+                    ("QueryResults", "1.2.3.4"),
+                ],
+            ),
+            event(
+                3,
+                SYSMON,
+                26,
+                &[
+                    ("ProcessGuid", "{C}"),
+                    ("DestinationIp", "1.2.3.4"),
+                    ("DestinationPort", "443"),
+                ],
+            ),
+            event(
+                4688,
+                "Security",
+                30,
+                &[
+                    ("NewProcessId", "0x190"),
+                    ("NewProcessName", r"C:\Windows\System32\whoami.exe"),
+                    ("ProcessId", "0x12c"),
+                    ("CommandLine", "whoami /all"),
+                ],
+            ),
+            event(
+                4688,
+                "Security",
+                40,
+                &[
+                    ("NewProcessId", "0x12c"),
+                    ("NewProcessName", r"C:\Users\Public\evil.exe"),
+                    ("ProcessId", "0xc8"),
+                ],
+            ),
         ]
     }
 
@@ -641,7 +713,10 @@ mod tests {
         // it is kept), but whoami (pid 0x190 = 400) is a child of the Sysmon evil.exe (pid 300).
         assert_eq!(whoami.pid, Some(400));
         assert_eq!(whoami.parent, Some(evil.id));
-        assert_eq!(forest.processes[by_name("cmd.exe").parent.unwrap()].name(), "explorer.exe");
+        assert_eq!(
+            forest.processes[by_name("cmd.exe").parent.unwrap()].name(),
+            "explorer.exe"
+        );
         let userinit = by_name("userinit.exe");
         assert!(userinit.inferred);
     }
@@ -664,14 +739,26 @@ mod tests {
         };
         let d = drill(&forest, &events, &opts);
         assert_eq!(d.roots.len(), 1);
-        let names: Vec<&str> = d.members.iter().map(|i| forest.processes[*i].name()).collect();
-        assert!(names.contains(&"cmd.exe") && names.contains(&"evil.exe") && names.contains(&"whoami.exe"));
+        let names: Vec<&str> = d
+            .members
+            .iter()
+            .map(|i| forest.processes[*i].name())
+            .collect();
+        assert!(
+            names.contains(&"cmd.exe")
+                && names.contains(&"evil.exe")
+                && names.contains(&"whoami.exe")
+        );
         assert!(!names.contains(&"explorer.exe"));
         let details: Vec<&str> = d.timeline.iter().map(|t| t.detail.as_str()).collect();
         assert!(details.contains(&"dns: c2.example.com -> 1.2.3.4"));
         assert!(details.iter().any(|d| d.starts_with("network")));
         let tree = tree_text(&forest, &d);
-        assert!(tree.contains("explorer.exe pid 100 [PC]  (parent)"), "{}", tree);
+        assert!(
+            tree.contains("explorer.exe pid 100 [PC]  (parent)"),
+            "{}",
+            tree
+        );
         assert!(tree.contains("◀ match"));
         assert!(tree.contains("⚠ suspicious"));
     }

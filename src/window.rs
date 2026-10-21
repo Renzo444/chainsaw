@@ -137,8 +137,8 @@ mod tests {
 
     #[test]
     fn resolves_last_from_anchor() {
-        let anchor = NaiveDateTime::parse_from_str("2024-01-10T12:00:00", "%Y-%m-%dT%H:%M:%S")
-            .unwrap();
+        let anchor =
+            NaiveDateTime::parse_from_str("2024-01-10T12:00:00", "%Y-%m-%dT%H:%M:%S").unwrap();
         let w = Window::resolve(None, None, Some("48h"), Some(anchor), None, false).unwrap();
         assert_eq!(w.to.unwrap().naive_utc(), anchor);
         assert_eq!(w.from.unwrap().naive_utc(), anchor - Duration::hours(48));
@@ -148,8 +148,8 @@ mod tests {
 
     #[test]
     fn resolves_timezones() {
-        let anchor = NaiveDateTime::parse_from_str("2024-01-10T12:00:00", "%Y-%m-%dT%H:%M:%S")
-            .unwrap();
+        let anchor =
+            NaiveDateTime::parse_from_str("2024-01-10T12:00:00", "%Y-%m-%dT%H:%M:%S").unwrap();
         let tz: Tz = "Europe/Rome".parse().unwrap();
         let w = Window::resolve(None, None, Some("1h"), Some(anchor), Some(tz), false).unwrap();
         assert_eq!(w.to.unwrap().naive_utc(), anchor - Duration::hours(1));

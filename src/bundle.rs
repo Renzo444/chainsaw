@@ -25,7 +25,11 @@ pub struct Bundle {
 }
 
 fn bundles() -> [(&'static str, &'static Dir<'static>); 3] {
-    [("rules", &RULES), ("sigma", &SIGMA), ("mappings", &MAPPINGS)]
+    [
+        ("rules", &RULES),
+        ("sigma", &SIGMA),
+        ("mappings", &MAPPINGS),
+    ]
 }
 
 fn files<'a>(dir: &'a Dir<'a>, out: &mut Vec<&'a include_dir::File<'a>>) {
@@ -41,7 +45,11 @@ pub fn counts() -> (usize, usize) {
         let mut out = vec![];
         files(dir, &mut out);
         out.iter()
-            .filter(|f| f.path().extension().is_some_and(|e| e == "yml" || e == "yaml"))
+            .filter(|f| {
+                f.path()
+                    .extension()
+                    .is_some_and(|e| e == "yml" || e == "yaml")
+            })
             .count()
     };
     (count(&RULES), count(&SIGMA))

@@ -171,7 +171,12 @@ pub fn group_tactics(group: &str) -> Vec<String> {
 /// Scores, sorts and numbers the findings, most important first.
 pub fn rank(findings: &mut [Finding]) {
     for f in findings.iter_mut() {
-        let tactic = f.tactics.iter().map(|t| tactic_weight(t)).max().unwrap_or(0);
+        let tactic = f
+            .tactics
+            .iter()
+            .map(|t| tactic_weight(t))
+            .max()
+            .unwrap_or(0);
         let spread = (f.hosts.len().saturating_sub(1) as u32 * 5).min(20);
         f.score = level_weight(&f.level) + tactic + spread;
     }
@@ -244,13 +249,21 @@ pub fn summarise(data: &Json) -> (String, String, String) {
         flatten(&fields, &mut flat);
         let detail = DETAIL_FIELDS
             .iter()
-            .filter_map(|k| flat.get(*k).filter(|v| !v.is_empty()).map(|v| format!("{}: {}", k, v)))
+            .filter_map(|k| {
+                flat.get(*k)
+                    .filter(|v| !v.is_empty())
+                    .map(|v| format!("{}: {}", k, v))
+            })
             .take(2)
             .collect::<Vec<_>>()
             .join("; ");
         return (host, event, truncate(&detail, 240));
     }
-    (String::new(), String::new(), truncate(&data.to_string(), 240))
+    (
+        String::new(),
+        String::new(),
+        truncate(&data.to_string(), 240),
+    )
 }
 
 /// Flattens nested objects into leaf name to text, keeping the first value seen for a name.
@@ -334,6 +347,10 @@ pub fn fmt_time(t: &Option<DateTime<Utc>>) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
+fn plural(n: usize, word: &str) -> String {
+    format!("{} {}{}", n, word, if n == 1 { "" } else { "s" })
+}
+
 fn capitalise(s: &str) -> String {
     let mut c = s.chars();
     c.next()
@@ -399,7 +416,12 @@ pub fn md_code(s: &str) -> String {
     if s.is_empty() {
         return String::new();
     }
-    format!("`{}`", s.replace('`', "'").replace('|', "\\|").replace(['\r', '\n'], " "))
+    format!(
+        "`{}`",
+        s.replace('`', "'")
+            .replace('|', "\\|")
+            .replace(['\r', '\n'], " ")
+    )
 }
 
 /// A Markdown report built from ranked findings plus any extra sections.
@@ -429,10 +451,10 @@ impl Report {
             md.push_str("No findings.\n");
         } else {
             md.push_str(&format!(
-                "{} findings from {} hits across {} hosts.\n\n",
-                self.findings.len(),
-                hits,
-                all_hosts.len()
+                "{} from {} across {}.\n\n",
+                plural(self.findings.len(), "finding"),
+                plural(hits, "hit"),
+                plural(all_hosts.len(), "host")
             ));
             md.push_str("| Severity | Findings | Hits |\n| --- | --- | --- |\n");
             for level in [
@@ -474,11 +496,7 @@ impl Report {
 
             md.push_str("\n## Details\n");
             for f in &self.findings {
-                md.push_str(&format!(
-                    "\n### {}. {}\n\n",
-                    f.rank,
-                    md_escape(&f.title)
-                ));
+                md.push_str(&format!("\n### {}. {}\n\n", f.rank, md_escape(&f.title)));
                 md.push_str(&format!(
                     "- **Severity:** {} (score {})\n- **Category:** {} ({})\n",
                     capitalise(&f.level.to_string()),
@@ -578,10 +596,28 @@ mod tests {
     #[test]
     fn ranks_by_severity_then_impact() {
         let detections = vec![
-            detection("Discovery", "high", &["attack.discovery"], "A", "2024-01-01T00:00:00Z"),
-            detection("Dump", "high", &["attack.credential-access"], "A", "2024-01-01T00:00:01Z"),
+            detection(
+                "Discovery",
+                "high",
+                &["attack.discovery"],
+                "A",
+                "2024-01-01T00:00:00Z",
+            ),
+            detection(
+                "Dump",
+                "high",
+                &["attack.credential-access"],
+                "A",
+                "2024-01-01T00:00:01Z",
+            ),
             detection("Noise", "low", &[], "A", "2024-01-01T00:00:02Z"),
-            detection("Dump", "high", &["attack.credential-access"], "B", "2024-01-01T00:00:03Z"),
+            detection(
+                "Dump",
+                "high",
+                &["attack.credential-access"],
+                "B",
+                "2024-01-01T00:00:03Z",
+            ),
             detection("Crit", "critical", &[], "A", "2024-01-01T00:00:04Z"),
         ];
         let findings = from_detections(&detections);
@@ -591,7 +627,10 @@ mod tests {
         assert_eq!(dump.count, 2);
         assert_eq!(dump.hosts.len(), 2);
         assert_eq!(dump.score, 70 + 25 + 5);
-        assert_eq!(dump.evidence[0].detail, "CommandLine: evil.exe -x; Image: C:\\evil.exe");
+        assert_eq!(
+            dump.evidence[0].detail,
+            "CommandLine: evil.exe -x; Image: C:\\evil.exe"
+        );
     }
 
     #[test]

@@ -37,6 +37,7 @@ Chainsaw provides a powerful ‘first-response’ capability to quickly identify
   - [What changed in Chainsaw v2](#what-changed-in-chainsaw-v2)
 - [Examples](#examples)
   - [Interactive Menu](#interactive-menu)
+  - [Investigating](#investigating)
   - [Searching](#searching)
   - [Hunting](#hunting)
   - [Analysis](#analysis)
@@ -187,6 +188,71 @@ automatically.
 - `F5` (or `Ctrl+R`, or the `Run` row) validates the options and runs the command. Output is shown
   in the normal terminal, and pressing `Enter` returns to the menu with the previous values kept.
 - `?` shows the full `--help` for the operation, `x` clears a field and `X` clears the form.
+
+### Investigating
+
+These commands are built for working an incident end to end. All of them accept the same time
+window options and output formats, and all are available from the interactive menu.
+
+#### Bundled rules
+
+The Chainsaw rules and the Windows rules from [SigmaHQ](https://github.com/SigmaHQ/sigma) (with the
+event log mapping) are built into the binary, so hunting needs nothing else:
+
+    ./chainsaw hunt evidence/
+
+Add `--bundled` to hunt with them alongside your own `-r`/`-s` rules. `-s` no longer needs a
+`--mapping`; the bundled event log mapping is used by default. Refresh the bundled Sigma rules with
+`scripts/update-sigma.sh`.
+
+#### Time windows
+
+`hunt`, `search`, `ioc`, `process` and `persistence` take `--last <duration>` (for example `24h`,
+`48h` or `7d`), which ends now, or at `--anchor <timestamp>` when the evidence was collected
+earlier:
+
+    ./chainsaw hunt evidence/ --last 48h --anchor 2024-05-01T09:30:00
+
+#### Ranked findings and Markdown reports
+
+Hunt results are summarised as findings ranked by severity, then by the impact of their MITRE
+ATT&CK tactics (impact, exfiltration and credential access rank above discovery, for example), then
+by how many hosts they touch. `--markdown` writes the ranked findings with the evidence behind each
+one as an easy to read report:
+
+    ./chainsaw hunt evidence/ --last 7d --markdown -o report.md
+
+#### IOC sweep
+
+Pivot on known bad process names, domains, IPs, hashes or keywords across every event log field.
+Indicators are typed automatically, matched on word boundaries, and can be given inline or in a file
+of `value[,severity[,note]]` lines (defanged values such as `evil[.]com` are accepted):
+
+    ./chainsaw ioc evidence/ --ioc mimikatz.exe --ioc evil.com -f iocs.txt
+
+Matches are ranked, and the processes behind them are listed with their Sysmon ProcessGuid for
+drilling down.
+
+#### Process drill-down
+
+Rebuild process trees from Sysmon Event ID 1 and Security Event ID 4688, then follow a process, its
+parents and every child it spawned, with a timeline of their network, DNS, file and registry
+activity:
+
+    ./chainsaw process evidence/ --name powershell.exe
+    ./chainsaw process evidence/ --guid 747F3D96-D83E-5D31-0000-0010A2D72E00
+
+#### Persistence sweep
+
+Check the most common persistence locations in one go and rank what is found:
+
+    ./chainsaw persistence evidence/ --min-level medium
+
+It covers new services, scheduled tasks, Run keys and other autorun registry locations, Winlogon,
+Image File Execution Options, AppInit DLLs, LSA packages, WMI event subscriptions, startup folders,
+new accounts and privileged group changes. Sources are event logs (System, Security, Sysmon,
+TaskScheduler and WMI-Activity), registry hives found in the evidence (`SOFTWARE`, `SYSTEM`,
+`NTUSER.DAT`, `UsrClass.dat`) and collected startup folder and scheduled task files.
 
 ### Searching
 

@@ -87,9 +87,9 @@ pub fn classify(value: &str) -> IocKind {
     }
     let labels: Vec<&str> = v.split('.').collect();
     if labels.len() >= 2
-        && labels.iter().all(|l| {
-            !l.is_empty() && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-        })
+        && labels
+            .iter()
+            .all(|l| !l.is_empty() && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
         && labels
             .last()
             .is_some_and(|tld| tld.len() >= 2 && tld.chars().all(|c| c.is_ascii_alphabetic()))
@@ -220,7 +220,9 @@ pub fn sweep(
     window: &Window,
     skip_errors: bool,
 ) -> crate::Result<Vec<Hit>> {
-    let events = events::load(files, window, skip_errors, |e| !sweeper.matches(e).is_empty())?;
+    let events = events::load(files, window, skip_errors, |e| {
+        !sweeper.matches(e).is_empty()
+    })?;
     let mut hits = vec![];
     for event in events {
         for (ioc, field) in sweeper.matches(&event) {
@@ -509,7 +511,10 @@ mod tests {
             .collect();
         let sweeper = Sweeper::new(iocs).unwrap();
         let m = |fields: &[(&str, &str)]| sweeper.matches(&event(fields));
-        assert_eq!(m(&[("QueryName", "cdn.evil.com")]), vec![(0, "QueryName".into())]);
+        assert_eq!(
+            m(&[("QueryName", "cdn.evil.com")]),
+            vec![(0, "QueryName".into())]
+        );
         assert!(m(&[("QueryName", "notevil.com")]).is_empty());
         assert!(m(&[("DestinationIp", "10.0.0.15")]).is_empty());
         assert_eq!(m(&[("DestinationIp", "10.0.0.1")]).len(), 1);

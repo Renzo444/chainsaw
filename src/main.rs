@@ -16,10 +16,10 @@ use chrono_tz::Tz;
 use clap::{ArgAction, CommandFactory, Parser, Subcommand};
 
 use chainsaw::{
-    Document, EvtxAnalyser, findings, ioc, persistence, process, Filter, Format, GapAnalyser, Hunter, Reader, RuleKind, RuleLevel,
-    RuleStatus, Searcher, ShimcacheAnalyser, SrumAnalyser, Writer, cli, flatten_gaps_for_json,
-    get_files, lint as lint_rule, load as load_rule, print_evtx_text_report, print_gap_text_report,
-    set_writer,
+    Document, EvtxAnalyser, Filter, Format, GapAnalyser, Hunter, Reader, RuleKind, RuleLevel,
+    RuleStatus, Searcher, ShimcacheAnalyser, SrumAnalyser, Writer, cli, findings,
+    flatten_gaps_for_json, get_files, ioc, lint as lint_rule, load as load_rule, persistence,
+    print_evtx_text_report, print_gap_text_report, process, set_writer,
     window::{Window, delocalise},
 };
 
@@ -369,6 +369,7 @@ enum Command {
 }
 
 #[derive(clap::Args)]
+#[command(next_help_heading = "Time Window")]
 struct WindowArgs {
     /// Only look at the most recent period, e.g. 24h, 48h or 7d. The window ends now, or at
     /// --anchor when provided.
@@ -406,6 +407,7 @@ impl WindowArgs {
 }
 
 #[derive(clap::Args)]
+#[command(next_help_heading = "Output")]
 struct ReportArgs {
     /// Print the output in json format.
     #[arg(group = "format", short = 'j', long = "json")]
